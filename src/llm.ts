@@ -32,7 +32,7 @@ const MAX_RETRIES = 3;
 const REQUEST_TIMEOUT_MS = 30_000;
 const BASE_BACKOFF_MS = 1_000;
 
-const NER_SYSTEM_PROMPT = `You are an academic named-entity recognition (NER) engine.
+const DEFAULT_SYSTEM_PROMPT = `You are an academic named-entity recognition (NER) engine.
 
 Given a text passage, extract all named entities and return ONLY a JSON object (no markdown, no explanation) in this exact format:
 {"entities":[{"text":"exact text","type":"TYPE","start":0,"end":5}]}
@@ -54,6 +54,11 @@ Rules:
 - Return ONLY valid JSON. No markdown code fences, no commentary.
 - If no entities found, return {"entities":[]}.`;
 
+function getSystemPrompt(): string {
+  const customPrompt = getPref("systemPrompt");
+  return customPrompt?.trim() || DEFAULT_SYSTEM_PROMPT;
+}
+
 // ── Preference helpers ───────────────────────────────────────────────
 
 function getPref(key: string): string {
@@ -70,12 +75,36 @@ function classifyHttpError(status: number): LlmErrorClassification {
 
 // ── JSON extraction ──────────────────────────────────────────────────
 
+function cleanMarkdownCodeBlock(raw: string): string {
+  let cleaned = raw.trim();
+
+  // Remove leading ```json or ```
+  if (cleaned.startsWith("```json")) {
+    cleaned = cleaned.slice(7);
+  } else if (cleaned.startsWith("```")) {
+    cleaned = cleaned.slice(3);
+  }
+
+  // Remove trailing ```
+  if (cleaned.endsWith("```")) {
+    cleaned = cleaned.slice(0, -3);
+  }
+
+  return cleaned.trim();
+}
+
 function extractJsonFromResponse(raw: string): string {
   // Try raw parse first
   const trimmed = raw.trim();
   if (trimmed.startsWith("{") || trimmed.startsWith("[")) return trimmed;
 
-  // Strip markdown code fences: ```json ... ``` or ``` ... ```
+  // Strip markdown code fences (handles both block and inline formats)
+  // Inline: ```json {"entities":[...]}```
+  // Block: ```json\n{"entities":[...]}\n```
+  const cleaned = cleanMarkdownCodeBlock(trimmed);
+  if (cleaned.startsWith("{") || cleaned.startsWith("[")) return cleaned;
+
+  // Fallback: regex for multi-line code blocks with extra text around them
   const fencePattern = /```(?:json)?\s*\n?([\s\S]*?)\n?\s*```/;
   const fenceMatch = fencePattern.exec(trimmed);
   if (fenceMatch) return fenceMatch[1].trim();
@@ -142,7 +171,7 @@ async function chatCompletion(messages: ChatMessage[]): Promise<string> {
   const baseURL = getPref("baseURL") || "https://openrouter.ai/api/v1";
   const model = getPref("model") || "z-ai/glm-4.5-air:free";
 
-  Zotero.debug(`[NER] API Key length: ${apiKey?.length ?? 0}, first 4 chars: ${apiKey?.substring(0, 4) ?? 'NONE'}`);
+  Zotero.debug(`[NER] API Key configured: ${apiKey ? 'yes' : 'no'}, length: ${apiKey?.length ?? 0}`);
   Zotero.debug(`[NER] Using baseURL: ${baseURL}, model: ${model}`);
 
   const url = `${baseURL.replace(/\/+$/, "")}/chat/completions`;
@@ -212,19 +241,23 @@ async function chatCompletion(messages: ChatMessage[]): Promise<string> {
 export async function extractEntities(text: string): Promise<NerEntity[]> {
   if (!text.trim()) return [];
 
+  const systemPrompt = getSystemPrompt();
+
   const rawResponse = await chatCompletion([
-    { role: "system", content: NER_SYSTEM_PROMPT },
+    { role: "system", content: systemPrompt },
     { role: "user", content: text },
   ]);
 
   Zotero.debug(`[NER] raw LLM response (${rawResponse.length} chars): ${rawResponse.slice(0, 300)}`);
 
   const jsonStr = extractJsonFromResponse(rawResponse);
+  Zotero.debug(`[NER] cleaned JSON (${jsonStr.length} chars): ${jsonStr.slice(0, 300)}`);
+  
   let parsed: { entities?: NerEntity[] };
   try {
     parsed = JSON.parse(jsonStr);
-  } catch {
-    throw new Error(`Failed to parse LLM JSON response: ${jsonStr.slice(0, 200)}`);
+  } catch (err: any) {
+    throw new Error(`Failed to parse LLM JSON response. Raw: "${rawResponse.slice(0, 150)}" | Cleaned: "${jsonStr.slice(0, 150)}" | Error: ${err.message}`);
   }
 
   const rawEntities = parsed.entities;

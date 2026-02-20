@@ -3,3 +3,4 @@ pref-api-section = LLM API 配置
 pref-api-key = API 密钥
 pref-base-url = API 地址
 pref-model = 模型
+pref-system-prompt-label = 系统提示词（LLM 的 NER 指令）

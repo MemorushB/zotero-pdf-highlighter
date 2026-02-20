@@ -1,5 +1,6 @@
 <vbox xmlns="http://www.mozilla.org/keymaster/gatekeeper/there.is.only.xul"
-      xmlns:html="http://www.w3.org/1999/xhtml">
+      xmlns:html="http://www.w3.org/1999/xhtml"
+      onload="Zotero.ZoteroPDFHighlighter.hooks.onPrefsLoad(event)">
 
   <!-- Script loaded via PreferencePanes.register scripts array for Zotero 8 compatibility -->
 
@@ -29,6 +30,13 @@
                   preference="extensions.zotero-pdf-highlighter.model"
                   style="flex: 1;"/>
     </hbox>
+
+    <separator class="thin"/>
+  </groupbox>
+
+  <groupbox>
+    <label><html:strong data-l10n-id="pref-system-prompt-label">System Prompt</html:strong></label>
+    <html:textarea id="pref-systemPrompt" rows="10" style="width: 100%; font-family: monospace; font-size: 12px;"/>
 
     <separator class="thin"/>
     <description style="font-size: 11px; color: #666;">
