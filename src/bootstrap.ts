@@ -9,6 +9,41 @@ export interface BootstrapData {
 
 let readerEventListenerId: any;
 const HIGHLIGHT_COLOR = '#ffd400';
+const HIGHLIGHT_FAILURE_MESSAGE = 'Could not create a highlight from this selection.';
+
+function showInlineFailureHint(button: any, event: any): void {
+    const originalText = button?.textContent || 'Create Highlight';
+    button.textContent = 'Highlight Failed';
+    button.disabled = true;
+
+    const timerHost = event?.doc?.defaultView;
+    if (timerHost && typeof timerHost.setTimeout === 'function') {
+        timerHost.setTimeout(() => {
+            button.textContent = originalText;
+            button.disabled = false;
+        }, 1500);
+        return;
+    }
+
+    button.textContent = originalText;
+    button.disabled = false;
+}
+
+function notifyHighlightFailure(event: any, button: any): 'zotero.alert' | 'inline-hint' {
+    if (typeof Zotero?.alert === 'function') {
+        const hostWindow = event?.doc?.defaultView || Zotero?.getMainWindow?.();
+        try {
+            Zotero.alert(hostWindow, 'Zotero PDF Highlighter', HIGHLIGHT_FAILURE_MESSAGE);
+            return 'zotero.alert';
+        } catch {
+            // Fallback handled below.
+        }
+    }
+
+    Zotero.debug('[Zotero PDF Highlighter] highlight creation failed');
+    showInlineFailureHint(button, event);
+    return 'inline-hint';
+}
 
 function summarizeResult(result: any): string {
     if (result === null) {
@@ -109,8 +144,11 @@ export function startup(data: BootstrapData, reason: number) {
         button.style.cursor = 'pointer';
         
         button.onclick = async () => {
-            Zotero.debug('[Zotero PDF Highlighter] create highlight from selection');
-            await createSelectionHighlight(event);
+            const created = await createSelectionHighlight(event);
+            if (!created) {
+                const feedbackMethod = notifyHighlightFailure(event, button);
+                Zotero.debug(`[Zotero PDF Highlighter] highlight not created (feedback=${feedbackMethod})`);
+            }
         };
         
         append(button);
