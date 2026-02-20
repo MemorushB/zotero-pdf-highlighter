@@ -1,6 +1,6 @@
 /**
  * LLM API client for NER extraction.
- * Uses raw fetch() — no npm runtime dependencies.
+ * Uses Zotero.HTTP.request() to bypass CookieSandbox header stripping.
  * Settings read from Zotero.Prefs at call time.
  */
 
@@ -156,18 +156,22 @@ async function chatCompletion(messages: ChatMessage[]): Promise<string> {
 
   for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
     try {
-      // Timeout via Promise.race — avoids AbortController which is
-      // unavailable in Zotero's older SpiderMonkey JS context.
-      const fetchPromise = fetch(url, { method: "POST", headers, body });
-      const timeoutPromise = new Promise<never>((_, reject) =>
-        setTimeout(() => reject(new Error(`LLM request timed out after ${REQUEST_TIMEOUT_MS}ms`)), REQUEST_TIMEOUT_MS),
-      );
-      const response = await Promise.race([fetchPromise, timeoutPromise]);
+      // Use Zotero.HTTP.request to bypass CookieSandbox which strips
+      // Authorization headers from regular fetch() calls.
+      const xhr = await Zotero.HTTP.request("POST", url, {
+        headers,
+        body,
+        responseType: "text",
+        timeout: REQUEST_TIMEOUT_MS,
+        successCodes: false, // Handle non-2xx responses manually
+      });
 
-      if (!response.ok) {
-        const errClassification = classifyHttpError(response.status);
-        const errBody = await response.text().catch(() => "");
-        lastError = new Error(`LLM API ${response.status}: ${errBody.slice(0, 200)}`);
+      const status = xhr.status;
+      const responseText = xhr.responseText;
+
+      if (status < 200 || status >= 300) {
+        const errClassification = classifyHttpError(status);
+        lastError = new Error(`LLM API ${status}: ${responseText.slice(0, 200)}`);
         Zotero.debug(`[NER] attempt ${attempt + 1}/${MAX_RETRIES} failed: ${lastError.message} (${errClassification.kind})`);
 
         if (!errClassification.retryable) throw lastError;
@@ -178,7 +182,7 @@ async function chatCompletion(messages: ChatMessage[]): Promise<string> {
         continue;
       }
 
-      const json = await response.json();
+      const json = JSON.parse(responseText);
       const content: string = json?.choices?.[0]?.message?.content ?? "";
       if (!content) throw new Error("LLM returned empty content");
       return content;
