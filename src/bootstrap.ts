@@ -14,13 +14,13 @@ async function createSelectionHighlight(event: any): Promise<boolean> {
     const reader = event?.reader;
     const annotation = { type: 'highlight', color: HIGHLIGHT_COLOR };
 
-    const candidates: Array<{ owner: any; method: string; argsList: any[][] }> = [
-        { owner: event, method: 'createAnnotationFromSelection', argsList: [[annotation], []] },
-        { owner: reader, method: 'createAnnotationFromSelection', argsList: [[annotation], []] },
-        { owner: reader, method: '_createAnnotation', argsList: [[annotation]] },
-        { owner: reader, method: 'createAnnotation', argsList: [[annotation]] },
-        { owner: reader?._internalReader, method: 'createAnnotationFromSelection', argsList: [[annotation], []] },
-        { owner: reader?._internalReader, method: '_createAnnotation', argsList: [[annotation]] }
+    const candidates: Array<{ owner: any; ownerLayer: 'event' | 'reader' | 'internalReader'; method: string; argsList: any[][] }> = [
+        { owner: event, ownerLayer: 'event', method: 'createAnnotationFromSelection', argsList: [[annotation], []] },
+        { owner: reader, ownerLayer: 'reader', method: 'createAnnotationFromSelection', argsList: [[annotation], []] },
+        { owner: reader, ownerLayer: 'reader', method: '_createAnnotation', argsList: [[annotation]] },
+        { owner: reader, ownerLayer: 'reader', method: 'createAnnotation', argsList: [[annotation]] },
+        { owner: reader?._internalReader, ownerLayer: 'internalReader', method: 'createAnnotationFromSelection', argsList: [[annotation], []] },
+        { owner: reader?._internalReader, ownerLayer: 'internalReader', method: '_createAnnotation', argsList: [[annotation]] }
     ];
 
     for (const candidate of candidates) {
@@ -31,17 +31,22 @@ async function createSelectionHighlight(event: any): Promise<boolean> {
 
         for (const args of candidate.argsList) {
             const argLabel = args.length === 0 ? 'no args' : 'annotation args';
-            Zotero.debug(`[Zotero PDF Highlighter] trying ${candidate.method} (${argLabel})`);
+            Zotero.debug(`[Zotero PDF Highlighter] trying ${candidate.method} on ${candidate.ownerLayer} (${argLabel})`);
 
             try {
-                const result = fn.apply(candidate.owner, args);
+                let result = fn.apply(candidate.owner, args);
                 if (result && typeof result.then === 'function') {
-                    await result;
+                    result = await result;
                 }
-                Zotero.debug(`[Zotero PDF Highlighter] highlight created via ${candidate.method}`);
+                if (result === false) {
+                    Zotero.debug(`[Zotero PDF Highlighter] ${candidate.method} on ${candidate.ownerLayer} returned false; trying next fallback`);
+                    continue;
+                }
+
+                Zotero.debug(`[Zotero PDF Highlighter] highlight created via ${candidate.method} on ${candidate.ownerLayer}`);
                 return true;
             } catch (error: any) {
-                Zotero.debug(`[Zotero PDF Highlighter] ${candidate.method} failed: ${error?.message || error}`);
+                Zotero.debug(`[Zotero PDF Highlighter] ${candidate.method} on ${candidate.ownerLayer} failed: ${error?.message || error}`);
             }
         }
     }
@@ -60,7 +65,7 @@ export function startup(data: BootstrapData, reason: number) {
     readerEventListenerId = Zotero.Reader.registerEventListener('renderTextSelectionPopup', (event: any) => {
         const { append, doc } = event;
         const button = doc.createElement('button');
-        button.textContent = 'VS Code Highlight';
+        button.textContent = 'Create Highlight';
         button.style.backgroundColor = '#1e1e1e';
         button.style.color = '#d4d4d4';
         button.style.border = '1px solid #333';
