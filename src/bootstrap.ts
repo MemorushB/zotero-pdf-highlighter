@@ -8,6 +8,47 @@ export interface BootstrapData {
 }
 
 let readerEventListenerId: any;
+const HIGHLIGHT_COLOR = '#ffd400';
+
+async function createSelectionHighlight(event: any): Promise<boolean> {
+    const reader = event?.reader;
+    const annotation = { type: 'highlight', color: HIGHLIGHT_COLOR };
+
+    const candidates: Array<{ owner: any; method: string; argsList: any[][] }> = [
+        { owner: event, method: 'createAnnotationFromSelection', argsList: [[annotation], []] },
+        { owner: reader, method: 'createAnnotationFromSelection', argsList: [[annotation], []] },
+        { owner: reader, method: '_createAnnotation', argsList: [[annotation]] },
+        { owner: reader, method: 'createAnnotation', argsList: [[annotation]] },
+        { owner: reader?._internalReader, method: 'createAnnotationFromSelection', argsList: [[annotation], []] },
+        { owner: reader?._internalReader, method: '_createAnnotation', argsList: [[annotation]] }
+    ];
+
+    for (const candidate of candidates) {
+        const fn = candidate.owner?.[candidate.method];
+        if (typeof fn !== 'function') {
+            continue;
+        }
+
+        for (const args of candidate.argsList) {
+            const argLabel = args.length === 0 ? 'no args' : 'annotation args';
+            Zotero.debug(`[Zotero PDF Highlighter] trying ${candidate.method} (${argLabel})`);
+
+            try {
+                const result = fn.apply(candidate.owner, args);
+                if (result && typeof result.then === 'function') {
+                    await result;
+                }
+                Zotero.debug(`[Zotero PDF Highlighter] highlight created via ${candidate.method}`);
+                return true;
+            } catch (error: any) {
+                Zotero.debug(`[Zotero PDF Highlighter] ${candidate.method} failed: ${error?.message || error}`);
+            }
+        }
+    }
+
+    Zotero.debug('[Zotero PDF Highlighter] failed to create highlight: no compatible method succeeded');
+    return false;
+}
 
 export function install(data: BootstrapData, reason: number) {
     Zotero.debug("Zotero PDF Highlighter: installed");
@@ -27,16 +68,9 @@ export function startup(data: BootstrapData, reason: number) {
         button.style.padding = '2px 5px';
         button.style.cursor = 'pointer';
         
-        button.onclick = () => {
-            // We can't easily change the DOM without breaking Zotero's selection logic, 
-            // so we use Zotero's official API to create a highlight annotation.
-            const color = '#c678dd'; // VS Code purple
-            Zotero.debug('[Zotero PDF Highlighter] creating official annotation for selection');
-            if (event.reader && event.reader._createAnnotation) {
-                event.reader._createAnnotation({ type: 'highlight', color: color });
-            } else {
-                Zotero.debug('Cannot find _createAnnotation');
-            }
+        button.onclick = async () => {
+            Zotero.debug('[Zotero PDF Highlighter] create highlight from selection');
+            await createSelectionHighlight(event);
         };
         
         append(button);
