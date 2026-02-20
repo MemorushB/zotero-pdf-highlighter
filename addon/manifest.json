@@ -1,0 +1,19 @@
+{
+  "manifest_version": 2,
+  "name": "Zotero PDF Highlighter",
+  "version": "0.2.0",
+  "description": "LLM-powered NER semantic highlighting for academic PDFs",
+  "author": "MemorushB",
+  "icons": {
+    "48": "content/icons/icon48.png",
+    "96": "content/icons/icon96.png"
+  },
+  "applications": {
+    "zotero": {
+      "id": "zotero-pdf-highlighter@memorushb.com",
+      "update_url": "https://raw.githubusercontent.com/MemorushB/zotero-pdf-highlighter/master/update.json",
+      "strict_min_version": "6.999",
+      "strict_max_version": "8.*"
+    }
+  }
+}

@@ -1,0 +1,57 @@
+<?xml version="1.0"?>
+<?xml-stylesheet href="chrome://global/skin/" type="text/css"?>
+<?xml-stylesheet href="chrome://zotero/skin/zotero.css" type="text/css"?>
+<!DOCTYPE window SYSTEM "chrome://zotero/locale/zotero.dtd">
+<vbox id="zotero-prefpane-zotero-pdf-highlighter"
+      xmlns="http://www.mozilla.org/keymaster/gatekeeper/there.is.only.xul"
+      xmlns:html="http://www.w3.org/1999/xhtml">
+
+  <groupbox>
+    <label><html:h2>&#x1F52C; PDF Highlighter &#x2014; LLM Settings</html:h2></label>
+
+    <grid>
+      <columns>
+        <column/>
+        <column flex="1"/>
+      </columns>
+      <rows>
+        <row align="center">
+          <label value="API Key:"/>
+          <html:input type="password"
+                      id="pref-apiKey"
+                      preference="extensions.zotero-pdf-highlighter.apiKey"
+                      style="flex: 1; width: 100%;"/>
+        </row>
+        <row align="center">
+          <label value="Base URL:"/>
+          <html:input type="text"
+                      id="pref-baseURL"
+                      preference="extensions.zotero-pdf-highlighter.baseURL"
+                      style="flex: 1; width: 100%;"/>
+        </row>
+        <row align="center">
+          <label value="Model:"/>
+          <html:input type="text"
+                      id="pref-model"
+                      preference="extensions.zotero-pdf-highlighter.model"
+                      style="flex: 1; width: 100%;"/>
+        </row>
+      </rows>
+    </grid>
+
+    <separator class="thin"/>
+    <description style="font-size: 11px; color: #666;">
+      Default: OpenRouter free model (z-ai/glm-4.5-air:free). Compatible with any OpenAI-compatible API.
+    </description>
+  </groupbox>
+
+  <groupbox>
+    <label><html:h3>Entity Types &amp; Colors</html:h3></label>
+    <description style="font-size: 11px;">
+      &#x1F535; METHOD (algorithms, models) &#xB7; &#x1F7E0; DATASET (benchmarks) &#xB7; &#x1F534; METRIC (scores) &#xB7; &#x1F7E2; TASK (objectives)
+    </description>
+    <description style="font-size: 11px;">
+      &#x1F7E1; PERSON (researchers) &#xB7; &#x1F7E3; MATERIAL (substances) &#xB7; &#x1F49C; INSTITUTION (organizations) &#xB7; &#x26AA; TERM (concepts)
+    </description>
+  </groupbox>
+</vbox>

@@ -1,6 +1,6 @@
 {
   "name": "zotero-pdf-highlighter",
-  "version": "1.0.0",
+  "version": "0.2.0",
   "description": "A Zotero 7 plugin for VS Code-like semantic PDF highlighting.",
   "main": "index.js",
   "scripts": {

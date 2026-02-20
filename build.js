@@ -1,29 +1,51 @@
 const esbuild = require('esbuild');
 const AdmZip = require('adm-zip');
+const fs = require('fs');
+const path = require('path');
 
 async function build() {
-    console.log("Compiling bootstrap.ts...");
+    // Ensure output directory exists
+    const outDir = path.join(__dirname, 'addon', 'content', 'scripts');
+    fs.mkdirSync(outDir, { recursive: true });
+
+    console.log('Compiling TypeScript...');
     await esbuild.build({
         entryPoints: ['src/bootstrap.ts'],
         bundle: true,
-        outfile: 'bootstrap.js',
-        target: 'es2022',
+        outfile: path.join(outDir, 'zotero-pdf-highlighter.js'),
+        target: 'firefox115',
         format: 'iife',
         globalName: 'ZoteroPlugin',
         footer: {
-            js: 'var install = ZoteroPlugin.install;\nvar startup = ZoteroPlugin.startup;\nvar shutdown = ZoteroPlugin.shutdown;\nvar uninstall = ZoteroPlugin.uninstall;'
+            js: 'var startup = ZoteroPlugin.startup; var shutdown = ZoteroPlugin.shutdown; var install = ZoteroPlugin.install; var uninstall = ZoteroPlugin.uninstall;'
         }
     });
 
-    console.log("Zipping extension...");
+    console.log('Building XPI...');
     const zip = new AdmZip();
-    zip.addLocalFile('manifest.json');
-    zip.addLocalFile('bootstrap.js');
-    zip.writeZip('zotero-pdf-highlighter.xpi');
-    console.log("Created zotero-pdf-highlighter.xpi");
+
+    // Add all addon/ contents
+    const addonDir = path.join(__dirname, 'addon');
+    addDirToZip(zip, addonDir, '');
+
+    zip.writeZip(path.join(__dirname, 'zotero-pdf-highlighter.xpi'));
+    console.log('Created zotero-pdf-highlighter.xpi');
 }
 
-build().catch(err => {
-    console.error(err);
+function addDirToZip(zip, dirPath, zipPath) {
+    const entries = fs.readdirSync(dirPath, { withFileTypes: true });
+    for (const entry of entries) {
+        const fullPath = path.join(dirPath, entry.name);
+        const entryZipPath = zipPath ? zipPath + '/' + entry.name : entry.name;
+        if (entry.isDirectory()) {
+            addDirToZip(zip, fullPath, entryZipPath);
+        } else {
+            zip.addLocalFile(fullPath, zipPath || '');
+        }
+    }
+}
+
+build().catch(e => {
+    console.error(e);
     process.exit(1);
 });

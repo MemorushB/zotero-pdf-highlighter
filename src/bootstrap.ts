@@ -278,6 +278,15 @@ export function startup(data: BootstrapData, reason: number) {
 
     registerPreferenceDefaults();
 
+    // Register preferences pane (scaffold pattern)
+    if (data.rootURI && Zotero.PreferencePanes?.register) {
+        Zotero.PreferencePanes.register({
+            pluginID: 'zotero-pdf-highlighter@memorushb.com',
+            src: data.rootURI + 'content/preferences.xhtml',
+            label: 'PDF Highlighter',
+        });
+    }
+
     registeredHandler = (event: any) => {
         const { append, doc } = event;
         const button = doc.createElement('button');
