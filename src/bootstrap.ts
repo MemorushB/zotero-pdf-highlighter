@@ -12,6 +12,7 @@ export interface BootstrapData {
 }
 
 let registeredHandler: ((event: any) => void) | null = null;
+let toolbarHandler: ((event: any) => void) | null = null;
 const FALLBACK_HIGHLIGHT_COLOR = '#ffd400';
 const HIGHLIGHT_FAILURE_MESSAGE = 'Could not create a highlight from this selection.';
 
@@ -305,6 +306,137 @@ export function startup(data: BootstrapData, reason: number) {
         append(button);
     };
     Zotero.Reader.registerEventListener('renderTextSelectionPopup', registeredHandler, 'zotero-pdf-highlighter');
+
+    // Register toolbar button for whole-page NER
+    toolbarHandler = (event: any) => {
+        const { append, doc, reader } = event;
+        const button = doc.createElement('button');
+        button.id = 'zotero-pdf-highlighter-toolbar-btn';
+        button.textContent = '🔬 NER';
+        button.title = 'Run NER highlighting on current page';
+        button.style.cssText = 'background:#1e1e1e;color:#d4d4d4;border:1px solid #333;border-radius:3px;padding:2px 8px;cursor:pointer;font-size:12px;margin-left:4px;';
+
+        button.onclick = async () => {
+            button.disabled = true;
+            button.textContent = '⏳ Analyzing...';
+            try {
+                // Get current page text from the reader
+                const internal = reader?._internalReader;
+                const currentPageIndex = internal?._primaryView?._iframeWindow?.PDFViewerApplication?.pdfViewer?.currentPageNumber
+                    ? internal._primaryView._iframeWindow.PDFViewerApplication.pdfViewer.currentPageNumber - 1
+                    : 0;
+
+                // Try to get text content from PDF.js
+                const pdfPages = internal?._primaryView?._iframeWindow?.PDFViewerApplication?.pdfViewer?._pages;
+                let pageText = '';
+                const pageRects: number[][] = [];
+
+                if (pdfPages && pdfPages[currentPageIndex]) {
+                    const pdfPage = pdfPages[currentPageIndex].pdfPage;
+                    if (pdfPage) {
+                        const textContent = await pdfPage.getTextContent();
+                        const items = textContent.items || [];
+
+                        for (const item of items) {
+                            if (item.str) {
+                                const tx = item.transform;
+                                // transform = [scaleX, skewX, skewY, scaleY, translateX, translateY]
+                                const x = tx[4];
+                                const y = tx[5];
+                                const width = item.width;
+                                const height = Math.abs(tx[3]) || item.height || 12;
+
+                                pageText += item.str;
+                                pageRects.push([x, y, x + width, y + height]);
+                            }
+                            if (item.hasEOL) {
+                                pageText += '\n';
+                            }
+                        }
+                    }
+                }
+
+                if (!pageText.trim()) {
+                    Zotero.debug('[Zotero PDF Highlighter] No text found on current page');
+                    button.textContent = '❌ No text';
+                    setTimeout(() => { button.textContent = '🔬 NER'; button.disabled = false; }, 2000);
+                    return;
+                }
+
+                Zotero.debug(`[Zotero PDF Highlighter] Page ${currentPageIndex} text length: ${pageText.length}`);
+
+                // Call LLM for NER
+                const entities = await extractEntities(pageText);
+                Zotero.debug(`[Zotero PDF Highlighter] Found ${entities.length} entities on page`);
+
+                if (entities.length === 0) {
+                    button.textContent = '✓ No entities';
+                    setTimeout(() => { button.textContent = '🔬 NER'; button.disabled = false; }, 2000);
+                    return;
+                }
+
+                // Create highlights for each entity
+                const attachment = reader?._item || (reader?.itemID ? Zotero.Items?.get(reader.itemID) : null);
+                const mgr = internal?._annotationManager;
+
+                let created = 0;
+                for (const entity of entities) {
+                    try {
+                        const entityColor = colorForEntityType(entity.type);
+                        const entityRects = computeEntityRects(pageText, pageRects, entity.start, entity.end);
+
+                        if (entityRects.length === 0) continue;
+
+                        const annotation = {
+                            type: 'highlight',
+                            color: entityColor,
+                            text: entity.text,
+                            comment: `[${entity.type}]`,
+                            position: {
+                                pageIndex: currentPageIndex,
+                                rects: entityRects,
+                            },
+                            pageLabel: String(currentPageIndex + 1),
+                            sortIndex: `${String(currentPageIndex).padStart(5, '0')}|000000|00000`,
+                            tags: [],
+                        };
+
+                        // Try Path A: annotation manager
+                        if (mgr && typeof mgr.addAnnotation === 'function') {
+                            const result = mgr.addAnnotation(annotation);
+                            if (result !== false && result !== null) {
+                                created++;
+                                continue;
+                            }
+                        }
+
+                        // Try Path B: saveFromJSON
+                        if (attachment && typeof Zotero.Annotations?.saveFromJSON === 'function') {
+                            const json = {
+                                key: Zotero.DataObjectUtilities?.generateKey?.() || `ner_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+                                ...annotation,
+                            };
+                            await Zotero.Annotations.saveFromJSON(attachment, json);
+                            created++;
+                        }
+                    } catch (e: any) {
+                        Zotero.debug(`[Zotero PDF Highlighter] Failed to create highlight for "${entity.text}": ${e?.message}`);
+                    }
+                }
+
+                button.textContent = `✓ ${created} entities`;
+                setTimeout(() => { button.textContent = '🔬 NER'; button.disabled = false; }, 3000);
+
+            } catch (error: any) {
+                Zotero.debug(`[Zotero PDF Highlighter] Toolbar NER failed: ${error?.message || error}`);
+                button.textContent = '❌ Error';
+                setTimeout(() => { button.textContent = '🔬 NER'; button.disabled = false; }, 2000);
+            }
+        };
+
+        append(button);
+    };
+    Zotero.Reader.registerEventListener('renderToolbar', toolbarHandler, 'zotero-pdf-highlighter');
 }
 
 export function shutdown(data: BootstrapData, reason: number) {
@@ -313,6 +445,11 @@ export function shutdown(data: BootstrapData, reason: number) {
     if (registeredHandler) {
         Zotero.Reader.unregisterEventListener('renderTextSelectionPopup', registeredHandler);
         registeredHandler = null;
+    }
+
+    if (toolbarHandler) {
+        Zotero.Reader.unregisterEventListener('renderToolbar', toolbarHandler);
+        toolbarHandler = null;
     }
 }
 
