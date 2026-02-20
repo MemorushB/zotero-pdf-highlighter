@@ -46,6 +46,8 @@ function notifyHighlightFailure(event: any, button: any): 'zotero.alert' | 'inli
 }
 
 function summarizeResult(result: any): string {
+    const MAX_STRING_PREVIEW = 80;
+
     if (result === null) {
         return 'null';
     }
@@ -55,7 +57,9 @@ function summarizeResult(result: any): string {
 
     const resultType = typeof result;
     if (resultType === 'string') {
-        return `string(${JSON.stringify(result)})`;
+        const isTruncated = result.length > MAX_STRING_PREVIEW;
+        const preview = isTruncated ? `${result.slice(0, MAX_STRING_PREVIEW)}...` : result;
+        return `string(len=${result.length}, preview=${JSON.stringify(preview)})`;
     }
     if (resultType === 'number' || resultType === 'boolean' || resultType === 'bigint') {
         return `${resultType}(${String(result)})`;
@@ -64,16 +68,21 @@ function summarizeResult(result: any): string {
         return `function(${result.name || 'anonymous'})`;
     }
 
-    const ctorName = result?.constructor?.name;
+    const ctorName = result?.constructor?.name || 'Object';
+    if (Array.isArray(result)) {
+        return `array(len=${result.length})`;
+    }
+
+    if (resultType === 'object') {
+        const keyCount = Object.keys(result).length;
+        return `object(type=${ctorName}, keys=${keyCount})`;
+    }
+
     if (ctorName && ctorName !== 'Object') {
         return `object(${ctorName})`;
     }
 
-    try {
-        return `object(${JSON.stringify(result)})`;
-    } catch {
-        return 'object([unserializable])';
-    }
+    return `type(${resultType})`;
 }
 
 async function createSelectionHighlight(event: any): Promise<boolean> {
@@ -83,6 +92,7 @@ async function createSelectionHighlight(event: any): Promise<boolean> {
     const candidates: Array<{ owner: any; ownerLayer: 'event' | 'reader' | 'internalReader'; method: string; argsList: any[][] }> = [
         { owner: event, ownerLayer: 'event', method: 'createAnnotationFromSelection', argsList: [[payload], []] },
         { owner: reader, ownerLayer: 'reader', method: 'createAnnotationFromSelection', argsList: [[payload], []] },
+        { owner: reader?._internalReader, ownerLayer: 'internalReader', method: 'createAnnotationFromSelection', argsList: [[payload], []] },
         { owner: reader?._internalReader, ownerLayer: 'internalReader', method: 'onAddAnnotation', argsList: [[payload]] },
         { owner: reader?._internalReader, ownerLayer: 'internalReader', method: '_onAddAnnotation', argsList: [[payload]] },
         { owner: reader, ownerLayer: 'reader', method: '_createAnnotation', argsList: [[payload]] },
