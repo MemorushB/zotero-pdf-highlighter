@@ -142,6 +142,9 @@ async function chatCompletion(messages: ChatMessage[]): Promise<string> {
   const baseURL = getPref("baseURL") || "https://openrouter.ai/api/v1";
   const model = getPref("model") || "z-ai/glm-4.5-air:free";
 
+  Zotero.debug(`[NER] API Key length: ${apiKey?.length ?? 0}, first 4 chars: ${apiKey?.substring(0, 4) ?? 'NONE'}`);
+  Zotero.debug(`[NER] Using baseURL: ${baseURL}, model: ${model}`);
+
   const url = `${baseURL.replace(/\/+$/, "")}/chat/completions`;
   const headers: Record<string, string> = { "Content-Type": "application/json" };
   if (apiKey) headers["Authorization"] = `Bearer ${apiKey}`;

@@ -284,6 +284,7 @@ export function startup(data: BootstrapData, reason: number) {
         Zotero.PreferencePanes.register({
             pluginID: 'zotero-pdf-highlighter@memorushb.com',
             src: data.rootURI + 'content/preferences.xhtml',
+            scripts: [data.rootURI + 'content/preferences.js'],
             label: 'PDF Highlighter',
         });
     }
