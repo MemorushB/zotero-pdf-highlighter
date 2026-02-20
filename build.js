@@ -8,7 +8,11 @@ async function build() {
         bundle: true,
         outfile: 'bootstrap.js',
         target: 'es2022',
-        format: 'iife'
+        format: 'iife',
+        globalName: 'ZoteroPlugin',
+        footer: {
+            js: 'var install = ZoteroPlugin.install;\nvar startup = ZoteroPlugin.startup;\nvar shutdown = ZoteroPlugin.shutdown;\nvar uninstall = ZoteroPlugin.uninstall;'
+        }
     });
 
     console.log("Zipping extension...");
