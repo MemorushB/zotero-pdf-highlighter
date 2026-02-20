@@ -3,8 +3,9 @@
   "name": "Zotero PDF Highlighter",
   "version": "0.1.0",
   "description": "VS Code syntax highlighting for Zotero PDFs",
+  "author": "MemorushB",
   "homepage_url": "https://github.com/MemorushB/zotero-pdf-highlighter",
-  "browser_specific_settings": {
+  "applications": {
     "zotero": {
       "id": "zotero-pdf-highlighter@memorushb.com",
       "update_url": "https://raw.githubusercontent.com/MemorushB/zotero-pdf-highlighter/main/update.json",
