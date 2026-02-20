@@ -32,10 +32,11 @@ export function startup(data: BootstrapData, reason: number) {
             // so we use Zotero's official API to create a highlight annotation.
             const color = '#c678dd'; // VS Code purple
             Zotero.debug('[Zotero PDF Highlighter] creating official annotation for selection');
-            event.reader.createAnnotationFromSelection({
-                type: 'highlight',
-                color: color
-            });
+            if (event.reader && event.reader._createAnnotation) {
+                event.reader._createAnnotation({ type: 'highlight', color: color });
+            } else {
+                Zotero.debug('Cannot find _createAnnotation');
+            }
         };
         
         append(button);
