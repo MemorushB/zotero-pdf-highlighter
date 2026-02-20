@@ -87,51 +87,100 @@ function summarizeResult(result: any): string {
 
 async function createSelectionHighlight(event: any): Promise<boolean> {
     const reader = event?.reader;
-    const payload = { type: 'highlight', color: HIGHLIGHT_COLOR };
+    const base = event?.params?.annotation;
 
-    const candidates: Array<{ owner: any; ownerLayer: 'event' | 'reader' | 'internalReader'; method: string; argsList: any[][] }> = [
-        { owner: event, ownerLayer: 'event', method: 'createAnnotationFromSelection', argsList: [[payload], []] },
-        { owner: reader, ownerLayer: 'reader', method: 'createAnnotationFromSelection', argsList: [[payload], []] },
-        { owner: reader?._internalReader, ownerLayer: 'internalReader', method: 'createAnnotationFromSelection', argsList: [[payload], []] },
-        { owner: reader?._internalReader, ownerLayer: 'internalReader', method: 'onAddAnnotation', argsList: [[payload]] },
-        { owner: reader?._internalReader, ownerLayer: 'internalReader', method: '_onAddAnnotation', argsList: [[payload]] },
-        { owner: reader, ownerLayer: 'reader', method: '_createAnnotation', argsList: [[payload]] },
-        { owner: reader, ownerLayer: 'reader', method: 'createAnnotation', argsList: [[payload]] },
-        { owner: reader?._internalReader, ownerLayer: 'internalReader', method: '_createAnnotation', argsList: [[payload]] },
-        { owner: reader?._internalReader, ownerLayer: 'internalReader', method: 'createAnnotation', argsList: [[payload]] }
-    ];
+    // Diagnostic: dump available keys for debugging
+    Zotero.debug(`[Zotero PDF Highlighter] event keys: ${Object.keys(event || {}).join(', ')}`);
+    Zotero.debug(`[Zotero PDF Highlighter] event.params keys: ${Object.keys(event?.params || {}).join(', ')}`);
+    if (base) {
+        Zotero.debug(`[Zotero PDF Highlighter] annotation base keys: ${Object.keys(base).join(', ')}`);
+    }
+    Zotero.debug(`[Zotero PDF Highlighter] reader keys: ${Object.keys(reader || {}).join(', ')}`);
 
-    for (const candidate of candidates) {
-        const fn = candidate.owner?.[candidate.method];
-        if (typeof fn !== 'function') {
-            continue;
-        }
-
-        for (const args of candidate.argsList) {
-            const argLabel = args.length === 0 ? 'no args' : 'payload';
-            Zotero.debug(`[Zotero PDF Highlighter] trying method=${candidate.method} owner=${candidate.ownerLayer} args=${argLabel}`);
-
-            try {
-                let result = fn.apply(candidate.owner, args);
-                if (result && typeof result.then === 'function') {
-                    result = await result;
-                }
-                Zotero.debug(`[Zotero PDF Highlighter] result method=${candidate.method} owner=${candidate.ownerLayer} value=${summarizeResult(result)}`);
-
-                if (result === false) {
-                    Zotero.debug(`[Zotero PDF Highlighter] method=${candidate.method} owner=${candidate.ownerLayer} returned explicit false; trying next fallback`);
-                    continue;
-                }
-
-                Zotero.debug(`[Zotero PDF Highlighter] highlight created via method=${candidate.method} owner=${candidate.ownerLayer}`);
-                return true;
-            } catch (error: any) {
-                Zotero.debug(`[Zotero PDF Highlighter] failed method=${candidate.method} owner=${candidate.ownerLayer} error=${error?.message || error}`);
-            }
-        }
+    // Guard: selection geometry data is required
+    if (!base || !base.position) {
+        Zotero.debug('[Zotero PDF Highlighter] no selection annotation data in event.params.annotation');
+        return false;
     }
 
-    Zotero.debug('[Zotero PDF Highlighter] failed to create highlight: no compatible method succeeded');
+    // Build full annotation payload by merging selection data with highlight config
+    const fullAnnotation = {
+        ...base,
+        type: 'highlight',
+        color: HIGHLIGHT_COLOR,
+    };
+
+    Zotero.debug(
+        `[Zotero PDF Highlighter] fullAnnotation type=${fullAnnotation.type} color=${fullAnnotation.color} ` +
+        `hasPosition=${!!fullAnnotation.position} text=${(fullAnnotation.text || '').substring(0, 60)}`
+    );
+
+    // Path A: Internal annotation manager (fast path, used by Zotero internally)
+    try {
+        const internal = reader?._internalReader;
+        const mgr = internal?._annotationManager ?? internal?.annotationManager;
+        if (mgr && typeof mgr.addAnnotation === 'function') {
+            Zotero.debug('[Zotero PDF Highlighter] trying Path A: _annotationManager.addAnnotation');
+            let result = mgr.addAnnotation(fullAnnotation);
+            if (result && typeof result.then === 'function') {
+                result = await result;
+            }
+            Zotero.debug(`[Zotero PDF Highlighter] Path A result: ${summarizeResult(result)}`);
+            if (result !== false && result !== null) {
+                Zotero.debug('[Zotero PDF Highlighter] Path A succeeded');
+                return true;
+            }
+        } else {
+            Zotero.debug(`[Zotero PDF Highlighter] Path A unavailable: mgr=${!!mgr}, addAnnotation=${typeof mgr?.addAnnotation}`);
+        }
+    } catch (error: any) {
+        Zotero.debug(`[Zotero PDF Highlighter] Path A failed: ${error?.message || error}`);
+    }
+
+    // Path B: Data-layer fallback via Zotero.Annotations.saveFromJSON
+    try {
+        const attachment = reader?._item || (reader?.itemID ? Zotero.Items?.get(reader.itemID) : null);
+        if (attachment && typeof Zotero.Annotations?.saveFromJSON === 'function') {
+            Zotero.debug('[Zotero PDF Highlighter] trying Path B: Zotero.Annotations.saveFromJSON');
+            const json = {
+                key: Zotero.DataObjectUtilities?.generateKey?.() || Zotero.Utilities?.generateObjectKey?.() || `highlight_${Date.now()}`,
+                ...fullAnnotation,
+                comment: fullAnnotation.comment || '',
+                tags: fullAnnotation.tags || [],
+            };
+            let result = Zotero.Annotations.saveFromJSON(attachment, json);
+            if (result && typeof result.then === 'function') {
+                result = await result;
+            }
+            Zotero.debug(`[Zotero PDF Highlighter] Path B result: ${summarizeResult(result)}`);
+            Zotero.debug('[Zotero PDF Highlighter] Path B succeeded');
+            return true;
+        } else {
+            Zotero.debug(`[Zotero PDF Highlighter] Path B unavailable: attachment=${!!attachment}, saveFromJSON=${typeof Zotero.Annotations?.saveFromJSON}`);
+        }
+    } catch (error: any) {
+        Zotero.debug(`[Zotero PDF Highlighter] Path B failed: ${error?.message || error}`);
+    }
+
+    // Path C: Last resort - try _onSetAnnotation if available
+    try {
+        const internal = reader?._internalReader;
+        if (internal && typeof internal._onSetAnnotation === 'function') {
+            Zotero.debug('[Zotero PDF Highlighter] trying Path C: _onSetAnnotation');
+            let result = internal._onSetAnnotation(fullAnnotation);
+            if (result && typeof result.then === 'function') {
+                result = await result;
+            }
+            if (result !== false) {
+                Zotero.debug('[Zotero PDF Highlighter] Path C succeeded');
+                return true;
+            }
+        }
+    } catch (error: any) {
+        Zotero.debug(`[Zotero PDF Highlighter] Path C failed: ${error?.message || error}`);
+    }
+
+    Zotero.debug('[Zotero PDF Highlighter] all paths failed');
     return false;
 }
 
