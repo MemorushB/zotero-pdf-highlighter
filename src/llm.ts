@@ -155,18 +155,14 @@ async function chatCompletion(messages: ChatMessage[]): Promise<string> {
   let lastError: Error | null = null;
 
   for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
-
     try {
-      const response = await fetch(url, {
-        method: "POST",
-        headers,
-        body,
-        signal: controller.signal,
-      });
-
-      clearTimeout(timeout);
+      // Timeout via Promise.race — avoids AbortController which is
+      // unavailable in Zotero's older SpiderMonkey JS context.
+      const fetchPromise = fetch(url, { method: "POST", headers, body });
+      const timeoutPromise = new Promise<never>((_, reject) =>
+        setTimeout(() => reject(new Error(`LLM request timed out after ${REQUEST_TIMEOUT_MS}ms`)), REQUEST_TIMEOUT_MS),
+      );
+      const response = await Promise.race([fetchPromise, timeoutPromise]);
 
       if (!response.ok) {
         const errClassification = classifyHttpError(response.status);
@@ -188,12 +184,7 @@ async function chatCompletion(messages: ChatMessage[]): Promise<string> {
       return content;
 
     } catch (err: any) {
-      clearTimeout(timeout);
-
-      if (err.name === "AbortError") {
-        lastError = new Error(`LLM request timed out after ${REQUEST_TIMEOUT_MS}ms`);
-        Zotero.debug(`[NER] attempt ${attempt + 1}/${MAX_RETRIES}: timeout`);
-      } else if (!lastError || lastError.message !== err.message) {
+      if (!lastError || lastError.message !== err.message) {
         lastError = err;
         Zotero.debug(`[NER] attempt ${attempt + 1}/${MAX_RETRIES}: ${err.message}`);
       }
