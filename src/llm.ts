@@ -34,6 +34,15 @@ interface SelectionHighlightResponse {
 
 interface CandidateSelectionResponse {
   selectedIds?: unknown;
+  selections?: Array<{
+    id?: unknown;
+    reason?: unknown;
+  }>;
+}
+
+export interface GlobalHighlightSelection {
+  id: string;
+  reason?: string;
 }
 
 interface LlmErrorClassification {
@@ -432,20 +441,44 @@ function coerceReadingHighlightSpans(response: SelectionHighlightResponse): Read
   });
 }
 
-function coerceSelectedIds(response: CandidateSelectionResponse, validIds: Set<string>): string[] {
+function pushSelectionIfValid(
+  orderedSelections: GlobalHighlightSelection[],
+  seen: Set<string>,
+  validIds: Set<string>,
+  id: unknown,
+  reason?: unknown
+): void {
+  if (typeof id !== "string") return;
+  if (!validIds.has(id) || seen.has(id)) return;
+
+  seen.add(id);
+  orderedSelections.push({
+    id,
+    reason: typeof reason === "string" ? reason.trim() : undefined,
+  });
+}
+
+function coerceSelectedHighlights(response: CandidateSelectionResponse, validIds: Set<string>): GlobalHighlightSelection[] {
+  const orderedSelections: GlobalHighlightSelection[] = [];
+  const seen = new Set<string>();
+
+  if (Array.isArray(response?.selections)) {
+    for (const selection of response.selections) {
+      if (!selection || typeof selection !== "object") continue;
+      pushSelectionIfValid(orderedSelections, seen, validIds, selection.id, selection.reason);
+    }
+    return orderedSelections;
+  }
+
   if (!Array.isArray(response?.selectedIds)) {
     return [];
   }
 
-  const orderedIds: string[] = [];
-  const seen = new Set<string>();
   for (const value of response.selectedIds) {
-    if (typeof value !== "string") continue;
-    if (!validIds.has(value) || seen.has(value)) continue;
-    seen.add(value);
-    orderedIds.push(value);
+    pushSelectionIfValid(orderedSelections, seen, validIds, value, "");
   }
-  return orderedIds;
+
+  return orderedSelections;
 }
 
 function buildSelectionUserPrompt(input: SelectionHighlightPromptInput, maxHighlights: number = 3): string {
@@ -468,6 +501,7 @@ function buildGlobalRankingUserPrompt(candidates: ReadingHighlightCandidate[], m
     `paper_title: ${paperTitle?.trim() || "unknown"}`,
     `selection_budget: up to ${maxHighlights}`,
     "Select the best highlights from these candidates according to the rubric.",
+    "Return JSON only: {\"selections\":[{\"id\":\"P1-C1\",\"reason\":\"method\"}]}",
     "Candidates:"
   ].join("\n");
 
@@ -499,7 +533,7 @@ export async function selectGlobalHighlightCandidateIds(
   paperTitle?: string | null,
   options: LlmRequestOptions = {},
   focusMode: string = 'balanced'
-): Promise<string[]> {
+): Promise<GlobalHighlightSelection[]> {
   if (!candidates.length || maxHighlights <= 0) return [];
 
   const validIds = new Set(candidates.map(candidate => candidate.id));
@@ -508,5 +542,5 @@ export async function selectGlobalHighlightCandidateIds(
     { role: "user", content: buildGlobalRankingUserPrompt(candidates, maxHighlights, paperTitle) },
   ], options);
 
-  return coerceSelectedIds(parsed, validIds);
+  return coerceSelectedHighlights(parsed, validIds);
 }

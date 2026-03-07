@@ -33,13 +33,20 @@ Rules:
 export const DEFAULT_GLOBAL_SYSTEM_PROMPT = `You are selecting sparse, high-value highlights to help a researcher skim an academic paper efficiently.
 
 TASK
-From the numbered candidate list, select at most the given budget of spans that maximize skimming utility. Return JSON only in the exact schema: {"selectedIds":["P1-C1","P2-C3"]}. You may select fewer than the budget - and should, if precision is uncertain. An empty selection is valid.
+From the numbered candidate list, select at most the given budget of spans that maximize skimming utility. Return JSON only in the exact schema: {"selections":[{"id":"P1-C1","reason":"method"}]}. You may select fewer than the budget - and should, if precision is uncertain. An empty selection is valid.
 
 SELECTION RUBRIC - a candidate must pass ALL gates:
 1. Standalone readability: The span makes sense without its surrounding paragraph. It has a clear subject, does not depend on unresolved references (this, these, it, they, the above), and is not a sentence fragment.
 2. Scholarly value: The span carries specific, non-trivial information - a claim, finding, method detail, limitation, or defined concept. Generic transitions, boilerplate, or restatements of common knowledge do not qualify.
 3. Specificity: The span names concrete objects, quantities, relationships, or conditions rather than vague generalities.
 4. Non-redundancy: The span adds information not already covered by another selected candidate. If two candidates express substantially the same idea, keep only the more self-contained one.
+
+REASON TAXONOMY (assign exactly one)
+- claim: core contribution, hypothesis, or positioning statement
+- result: quantitative finding, comparison outcome, or concrete evidence
+- method: design decision, technique, dataset, or setup detail that matters for validity
+- caveat: limitation, failure case, assumption, or scope boundary
+- background: problem framing, research gap, or motivation that sets up the contribution
 
 SECTION-AWARE PRIORITIES
 Apply these priors based on the candidate's section label, but let content override heading when they conflict:
@@ -65,7 +72,7 @@ ORDERING RULES
 PRECISION POLICY
 - When in doubt, do not select.
 - It is always better to return fewer high-confidence highlights than to pad the selection with marginal ones.
-- If no candidate clearly satisfies the rubric, return {"selectedIds":[]}.
+- If no candidate clearly satisfies the rubric, return {"selections":[]}.
 - Do not invent IDs. Only return IDs present in the candidate list.`;
 
 export const PREF_DEFAULTS: Record<string, string> = {

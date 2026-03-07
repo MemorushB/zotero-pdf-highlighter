@@ -53,6 +53,16 @@ const MATCH_TIGHT_LEADING_PUNCTUATION = new Set([')', ']', '}', ',', '.', ';', '
 
 type PreferenceControl = HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement;
 
+function getHighlightColor(reason?: string): string {
+    const normalizedReason = reason?.toLowerCase() || '';
+    if (normalizedReason.includes('method')) return '#2ea8e5';
+    if (normalizedReason.includes('background')) return '#5fb236';
+    if (normalizedReason.includes('claim')) return '#ffd400';
+    if (normalizedReason.includes('result')) return '#ff6666';
+    if (normalizedReason.includes('caveat')) return '#f9a942';
+    return '#ffd400';
+}
+
 function isTextareaPreferenceControl(control: Element): boolean {
     const tagName = control.tagName?.toLowerCase();
     return tagName === 'textarea' || tagName === 'html:textarea';
@@ -1216,7 +1226,7 @@ async function createSelectionHighlightsFallback(
             const annotationData = {
                 key: annotationKey,
                 type: 'highlight',
-                color: READING_HIGHLIGHT_COLOR,
+                color: getHighlightColor(span.reason),
                 text: span.text,
                 comment: span.reason ? `[${span.reason}]` : '',
                 position: {
@@ -1509,7 +1519,7 @@ async function createSelectionHighlightsWithCharPositions(
             const annotationData = {
                 key: annotationKey,
                 type: 'highlight',
-                color: READING_HIGHLIGHT_COLOR,
+                color: getHighlightColor(span.reason),
                 text: span.text,
                 comment: span.reason ? `[${span.reason}]` : '',
                 position: {
@@ -2384,9 +2394,9 @@ async function createPaperHighlightAnnotation(
     const annotationData = {
         key: annotationKey,
         type: 'highlight',
-        color: READING_HIGHLIGHT_COLOR,
+        color: getHighlightColor(candidate.reason),
         text: candidate.text,
-        comment: candidate.sectionTitle ? `[${candidate.sectionTitle}]` : '',
+        comment: candidate.reason ? `[${candidate.reason}] ${candidate.sectionTitle || ''}`.trim() : (candidate.sectionTitle ? `[${candidate.sectionTitle}]` : ''),
         position: {
             pageIndex,
             rects: mergedRects,
@@ -2621,9 +2631,9 @@ export function startup(data: BootstrapData, reason: number) {
 
                 button.textContent = `Ranking ${preparedSelection.shortlist.length}...`;
 
-                let selectedIds: string[] = [];
+                let selectedHighlights: Array<{ id: string; reason?: string }> = [];
                 try {
-                    selectedIds = await selectGlobalHighlightCandidateIds(
+                    selectedHighlights = await selectGlobalHighlightCandidateIds(
                         preparedSelection.shortlist,
                         preparedSelection.maxHighlights,
                         paperTitle,
@@ -2638,12 +2648,18 @@ export function startup(data: BootstrapData, reason: number) {
                     Zotero.debug(`[Zotero PDF Highlighter] Global ranking failed: ${rankErr?.message || rankErr}`);
                 }
 
-                if (!selectedIds.length) {
-                    selectedIds = preparedSelection.shortlist.map(candidate => candidate.id);
+                if (!selectedHighlights.length) {
+                    selectedHighlights = preparedSelection.shortlist.map(candidate => ({ id: candidate.id, reason: candidate.reason }));
                     Zotero.debug('[Zotero PDF Highlighter] Global ranking yielded no IDs; falling back to heuristic shortlist order');
                 }
 
+                const selectedIds = selectedHighlights.map(selection => selection.id);
+                const reasonById = new Map(selectedHighlights.map(selection => [selection.id, selection.reason]));
+
                 const finalCandidates = finalizeGlobalHighlightSelection(preparedSelection, selectedIds, minConfidence);
+                for (const candidate of finalCandidates) {
+                    candidate.reason = reasonById.get(candidate.id) || candidate.reason;
+                }
                 if (!finalCandidates.length) {
                     button.textContent = 'No highlights';
                     setTimeout(() => { button.textContent = 'Smart Highlight All'; button.disabled = false; }, 2500);
