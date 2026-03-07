@@ -53,12 +53,32 @@ const MATCH_TIGHT_LEADING_PUNCTUATION = new Set([')', ']', '}', ',', '.', ';', '
 
 type PreferenceControl = HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement;
 
-function setPreferenceControlValue(control: PreferenceControl, value: string): void {
-    control.value = value;
+function isTextareaPreferenceControl(control: Element): boolean {
+    const tagName = control.tagName?.toLowerCase();
+    return tagName === 'textarea' || tagName === 'html:textarea';
+}
 
-    if (control instanceof HTMLTextAreaElement) {
-        control.defaultValue = value;
+function setPreferenceControlValue(control: Element, value: string): void {
+    const valueControl = control as PreferenceControl & { defaultValue?: string };
+    valueControl.value = value;
+
+    if (!isTextareaPreferenceControl(control)) {
+        return;
     }
+
+    valueControl.defaultValue = value;
+    control.textContent = value;
+
+    const view = control.ownerDocument?.defaultView;
+    if (!view || typeof view.setTimeout !== 'function') {
+        return;
+    }
+
+    view.setTimeout(() => {
+        valueControl.value = value;
+        valueControl.defaultValue = value;
+        control.textContent = value;
+    }, 0);
 }
 
 interface AsyncTimeoutOptions {
