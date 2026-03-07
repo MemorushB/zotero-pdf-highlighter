@@ -1051,7 +1051,7 @@ async function createNerHighlightsFallback(
     const internal = reader?._internalReader || reader;
     const mgr = internal?._annotationManager;
     const baseRects = annotationBase.position?.rects ?? [];
-    const popupPageIndex = resolvePopupPageIndex(annotationBase);
+    const popupPageIndex = resolvePopupPageIndex(reader, annotationBase);
     if (popupPageIndex.debugMessage) {
         Zotero.debug(`[Zotero PDF Highlighter] ${popupPageIndex.debugMessage}`);
     }
@@ -1164,7 +1164,7 @@ async function createNerHighlightsWithCharPositions(
 
     const internal = reader?._internalReader || reader;
     const mgr = internal?._annotationManager;
-    const popupPageIndex = resolvePopupPageIndex(annotationBase);
+    const popupPageIndex = resolvePopupPageIndex(reader, annotationBase);
     if (popupPageIndex.debugMessage) {
         Zotero.debug(`[Zotero PDF Highlighter] ${popupPageIndex.debugMessage}`);
     }
@@ -1683,7 +1683,26 @@ function parseNumericPageLabel(pageLabel: unknown): number | null {
     return parsedPageNumber - 1;
 }
 
-function resolvePopupPageIndex(annotationBase: any): PopupPageIndexResolution {
+function getReaderCurrentPageIndex(reader: any): number | null {
+    const primaryViewStatsPageIndex = reader?._internalReader?._state?.primaryViewStats?.pageIndex;
+    if (Number.isFinite(primaryViewStatsPageIndex) && primaryViewStatsPageIndex >= 0) {
+        return primaryViewStatsPageIndex;
+    }
+
+    const secondaryViewStatsPageIndex = reader?._internalReader?._state?.secondaryViewStats?.pageIndex;
+    if (Number.isFinite(secondaryViewStatsPageIndex) && secondaryViewStatsPageIndex >= 0) {
+        return secondaryViewStatsPageIndex;
+    }
+
+    const currentPageNumber = getPdfViewerFromPrimaryView(getPrimaryView(reader))?.currentPageNumber;
+    if (Number.isFinite(currentPageNumber) && currentPageNumber > 0) {
+        return currentPageNumber - 1;
+    }
+
+    return null;
+}
+
+function resolvePopupPageIndex(reader: any, annotationBase: any): PopupPageIndexResolution {
     const rawPageIndex = annotationBase?.position?.pageIndex;
     const pageLabelIndex = parseNumericPageLabel(annotationBase?.pageLabel);
 
@@ -1701,9 +1720,17 @@ function resolvePopupPageIndex(annotationBase: any): PopupPageIndexResolution {
         };
     }
 
+    const readerCurrentPageIndex = getReaderCurrentPageIndex(reader);
+    if (readerCurrentPageIndex !== null) {
+        return {
+            pageIndex: readerCurrentPageIndex,
+            debugMessage: `Popup geometry pageIndex was missing or invalid and pageLabel=${JSON.stringify(annotationBase?.pageLabel)} was not safely parseable; using current reader pageIndex=${readerCurrentPageIndex}`,
+        };
+    }
+
     return {
         pageIndex: null,
-        debugMessage: `Popup geometry pageIndex was missing or invalid and pageLabel=${JSON.stringify(annotationBase?.pageLabel)} was not safely parseable`,
+        debugMessage: `Popup geometry pageIndex was missing or invalid, pageLabel=${JSON.stringify(annotationBase?.pageLabel)} was not safely parseable, and current reader pageIndex was unavailable`,
     };
 }
 

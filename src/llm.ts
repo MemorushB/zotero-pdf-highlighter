@@ -212,7 +212,7 @@ function extractSingletonArrayElement(input: string): string | null {
   }
 
   const suffix = input.slice(valueEnd);
-  if (!/^[\s\])]*$/.test(suffix) || suffix.includes("]")) {
+  if (!/^[\s\]]*$/.test(suffix)) {
     return null;
   }
 
