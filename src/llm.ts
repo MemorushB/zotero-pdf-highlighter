@@ -20,9 +20,29 @@ interface ChatMessage {
   content: string;
 }
 
+export interface ExtractEntitiesOptions {
+  timeoutMs?: number;
+  maxRetries?: number;
+  callerLabel?: string;
+}
+
 interface LlmErrorClassification {
   kind: "rate_limit" | "server_error" | "client_error";
   retryable: boolean;
+}
+
+class EmptyLlmContentError extends Error {
+  constructor(message = "LLM returned empty content") {
+    super(message);
+    this.name = "EmptyLlmContentError";
+  }
+}
+
+class NonRetryableLlmError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "NonRetryableLlmError";
+  }
 }
 
 // ── Constants ────────────────────────────────────────────────────────
@@ -32,31 +52,19 @@ const MAX_RETRIES = 3;
 const REQUEST_TIMEOUT_MS = 30_000;
 const BASE_BACKOFF_MS = 1_000;
 
-const DEFAULT_SYSTEM_PROMPT = `You are an academic named-entity recognition (NER) engine.
-
-Given a text passage, extract all named entities and return ONLY a JSON object (no markdown, no explanation) in this exact format:
-{"entities":[{"text":"exact text","type":"TYPE","start":0,"end":5}]}
-
-Entity types:
-1. METHOD — algorithms, models, architectures, techniques (e.g., "BERT", "gradient descent")
-2. DATASET — named datasets, benchmarks (e.g., "ImageNet", "GLUE")
-3. METRIC — evaluation measures, scores (e.g., "F1 score", "accuracy", "95%")
-4. TASK — research problems, objectives (e.g., "object detection", "NER")
-5. PERSON — researchers, authors (e.g., "Vaswani", "Hinton")
-6. MATERIAL — chemicals, genes, proteins, substances (e.g., "dopamine", "graphene")
-7. INSTITUTION — organizations, universities, companies (e.g., "MIT", "Google")
-8. TERM — key technical terms, theories, concepts (e.g., "attention mechanism", "overfitting")
-
-Rules:
-- "start" is the 0-based character offset where the entity begins in the input text.
-- "end" is the exclusive character offset (start + length of entity text).
-- "text" must be the exact substring from the input at [start, end).
-- Return ONLY valid JSON. No markdown code fences, no commentary.
-- If no entities found, return {"entities":[]}.`;
+const DEFAULT_SYSTEM_PROMPT = `Extract academic named entities from the user text.
+Return JSON only in this exact schema: {"entities":[{"text":"exact text","type":"TYPE","start":0,"end":5}]}
+Allowed types: METHOD, DATASET, METRIC, TASK, PERSON, MATERIAL, INSTITUTION, TERM.
+Rules: no explanation, no reasoning, no markdown, no restating input, stop immediately after the closing }. If none, return {"entities":[]}.
+Offsets: start is 0-based, end is exclusive, and text must be the exact substring at [start, end).`;
 
 function getSystemPrompt(): string {
   const customPrompt = getPref("systemPrompt");
   return customPrompt?.trim() || DEFAULT_SYSTEM_PROMPT;
+}
+
+function getLogPrefix(callerLabel?: string): string {
+  return callerLabel ? `[NER:${callerLabel}]` : "[NER]";
 }
 
 // ── Preference helpers ───────────────────────────────────────────────
@@ -93,21 +101,156 @@ function cleanMarkdownCodeBlock(raw: string): string {
   return cleaned.trim();
 }
 
+function isJsonWhitespace(char: string): boolean {
+  return char === " " || char === "\n" || char === "\r" || char === "\t";
+}
+
+function findBalancedJsonEnd(input: string, startIndex = 0): number | null {
+  const startChar = input[startIndex];
+  if (startChar !== "{" && startChar !== "[") {
+    return null;
+  }
+
+  const stack: string[] = [startChar];
+  let inString = false;
+  let isEscaped = false;
+
+  for (let index = startIndex + 1; index < input.length; index++) {
+    const char = input[index];
+
+    if (inString) {
+      if (isEscaped) {
+        isEscaped = false;
+        continue;
+      }
+
+      if (char === "\\") {
+        isEscaped = true;
+        continue;
+      }
+
+      if (char === '"') {
+        inString = false;
+      }
+      continue;
+    }
+
+    if (char === '"') {
+      inString = true;
+      continue;
+    }
+
+    if (char === "{" || char === "[") {
+      stack.push(char);
+      continue;
+    }
+
+    if (char === "}") {
+      if (stack[stack.length - 1] !== "{") {
+        return null;
+      }
+      stack.pop();
+      if (stack.length === 0) {
+        return index + 1;
+      }
+      continue;
+    }
+
+    if (char === "]") {
+      if (stack[stack.length - 1] !== "[") {
+        return null;
+      }
+      stack.pop();
+      if (stack.length === 0) {
+        return index + 1;
+      }
+    }
+  }
+
+  return null;
+}
+
+function hasOnlySafeJsonSuffixNoise(suffix: string): boolean {
+  return /^[\s)]*$/.test(suffix);
+}
+
+function extractBalancedJsonPrefix(input: string): string | null {
+  if (!input || (input[0] !== "{" && input[0] !== "[")) {
+    return null;
+  }
+
+  const balancedEnd = findBalancedJsonEnd(input);
+  if (balancedEnd === null) {
+    return null;
+  }
+
+  const suffix = input.slice(balancedEnd);
+  if (!hasOnlySafeJsonSuffixNoise(suffix)) {
+    return null;
+  }
+
+  return input.slice(0, balancedEnd);
+}
+
+function extractSingletonArrayElement(input: string): string | null {
+  if (!input.startsWith("[")) {
+    return null;
+  }
+
+  let valueStart = 1;
+  while (valueStart < input.length && isJsonWhitespace(input[valueStart])) {
+    valueStart++;
+  }
+
+  if (valueStart >= input.length || (input[valueStart] !== "{" && input[valueStart] !== "[")) {
+    return null;
+  }
+
+  const valueEnd = findBalancedJsonEnd(input, valueStart);
+  if (valueEnd === null) {
+    return null;
+  }
+
+  const suffix = input.slice(valueEnd);
+  if (!/^[\s\])]*$/.test(suffix) || suffix.includes("]")) {
+    return null;
+  }
+
+  return input.slice(valueStart, valueEnd);
+}
+
 function extractJsonFromResponse(raw: string): string {
   // Try raw parse first
   const trimmed = raw.trim();
+  const balancedTrimmed = extractBalancedJsonPrefix(trimmed);
+  if (balancedTrimmed) return balancedTrimmed;
+
+  const singletonArrayElement = extractSingletonArrayElement(trimmed);
+  if (singletonArrayElement) return singletonArrayElement;
+
   if (trimmed.startsWith("{") || trimmed.startsWith("[")) return trimmed;
 
   // Strip markdown code fences (handles both block and inline formats)
   // Inline: ```json {"entities":[...]}```
   // Block: ```json\n{"entities":[...]}\n```
   const cleaned = cleanMarkdownCodeBlock(trimmed);
+  const balancedCleaned = extractBalancedJsonPrefix(cleaned);
+  if (balancedCleaned) return balancedCleaned;
+
+  const singletonCleanedArrayElement = extractSingletonArrayElement(cleaned);
+  if (singletonCleanedArrayElement) return singletonCleanedArrayElement;
+
   if (cleaned.startsWith("{") || cleaned.startsWith("[")) return cleaned;
 
   // Fallback: regex for multi-line code blocks with extra text around them
   const fencePattern = /```(?:json)?\s*\n?([\s\S]*?)\n?\s*```/;
   const fenceMatch = fencePattern.exec(trimmed);
-  if (fenceMatch) return fenceMatch[1].trim();
+  if (fenceMatch) {
+    const fencedContent = fenceMatch[1].trim();
+    return extractBalancedJsonPrefix(fencedContent)
+      ?? extractSingletonArrayElement(fencedContent)
+      ?? fencedContent;
+  }
 
   // Last resort: find first { ... last }
   const firstBrace = trimmed.indexOf("{");
@@ -117,6 +260,79 @@ function extractJsonFromResponse(raw: string): string {
   }
 
   return trimmed;
+}
+
+function extractTextFromContentPart(part: unknown): string {
+  if (typeof part === "string") return part;
+  if (!part || typeof part !== "object") return "";
+
+  const text = (part as { text?: unknown }).text;
+  if (typeof text === "string") return text;
+
+  const nestedContent = (part as { content?: unknown }).content;
+  if (typeof nestedContent === "string") return nestedContent;
+
+  return "";
+}
+
+function extractMessageContent(responseJson: any): string {
+  const choice = responseJson?.choices?.[0];
+  const message = choice?.message;
+  const directContent = message?.content ?? choice?.text ?? responseJson?.output_text;
+
+  if (typeof directContent === "string") return directContent.trim();
+
+  if (Array.isArray(directContent)) {
+    return directContent
+      .map(extractTextFromContentPart)
+      .join("")
+      .trim();
+  }
+
+  if (directContent && typeof directContent === "object") {
+    const text = extractTextFromContentPart(directContent);
+    if (text) return text.trim();
+  }
+
+  const alternativeSegments = message?.tool_calls ?? message?.parts ?? responseJson?.content;
+  if (Array.isArray(alternativeSegments)) {
+    return alternativeSegments
+      .map(extractTextFromContentPart)
+      .join("")
+      .trim();
+  }
+
+  return "";
+}
+
+function describeParsedRootShape(value: unknown): "array" | "object" | "primitive" {
+  if (Array.isArray(value)) return "array";
+  if (value && typeof value === "object") return "object";
+  return "primitive";
+}
+
+function extractEntitiesArray(parsed: unknown): NerEntity[] | null {
+  if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+    const directEntities = (parsed as { entities?: unknown }).entities;
+    return Array.isArray(directEntities) ? directEntities as NerEntity[] : null;
+  }
+
+  if (!Array.isArray(parsed)) {
+    return null;
+  }
+
+  for (const item of parsed) {
+    if (!item || typeof item !== "object" || Array.isArray(item)) {
+      continue;
+    }
+
+    const itemEntities = (item as { entities?: unknown }).entities;
+    if (Array.isArray(itemEntities)) {
+      return itemEntities as NerEntity[];
+    }
+  }
+
+  return null;
 }
 
 // ── Offset validation & repair ───────────────────────────────────────
@@ -166,13 +382,16 @@ function validateAndRepairEntities(entities: NerEntity[], sourceText: string): N
 
 // ── Core API call with retry ─────────────────────────────────────────
 
-async function chatCompletion(messages: ChatMessage[]): Promise<string> {
+async function chatCompletion(messages: ChatMessage[], options: ExtractEntitiesOptions = {}): Promise<string> {
   const apiKey = getPref("apiKey");
   const baseURL = getPref("baseURL") || "https://openrouter.ai/api/v1";
   const model = getPref("model") || "z-ai/glm-4.5-air:free";
+  const timeoutMs = options.timeoutMs ?? REQUEST_TIMEOUT_MS;
+  const maxRetries = options.maxRetries ?? MAX_RETRIES;
+  const logPrefix = getLogPrefix(options.callerLabel);
 
-  Zotero.debug(`[NER] API Key configured: ${apiKey ? 'yes' : 'no'}, length: ${apiKey?.length ?? 0}`);
-  Zotero.debug(`[NER] Using baseURL: ${baseURL}, model: ${model}`);
+  Zotero.debug(`${logPrefix} API Key configured: ${apiKey ? 'yes' : 'no'}, length: ${apiKey?.length ?? 0}`);
+  Zotero.debug(`${logPrefix} Using baseURL: ${baseURL}, model: ${model}`);
 
   const url = `${baseURL.replace(/\/+$/, "")}/chat/completions`;
   const headers: Record<string, string> = { "Content-Type": "application/json" };
@@ -181,12 +400,13 @@ async function chatCompletion(messages: ChatMessage[]): Promise<string> {
   const body = JSON.stringify({
     model,
     messages,
+    enable_thinking: false,
     temperature: 0,
   });
 
   let lastError: Error | null = null;
 
-  for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
+  for (let attempt = 0; attempt < maxRetries; attempt++) {
     try {
       // Use Zotero.HTTP.request to bypass CookieSandbox which strips
       // Authorization headers from regular fetch() calls.
@@ -194,7 +414,7 @@ async function chatCompletion(messages: ChatMessage[]): Promise<string> {
         headers,
         body,
         responseType: "text",
-        timeout: REQUEST_TIMEOUT_MS,
+        timeout: timeoutMs,
         successCodes: false, // Handle non-2xx responses manually
       });
 
@@ -204,29 +424,50 @@ async function chatCompletion(messages: ChatMessage[]): Promise<string> {
       if (status < 200 || status >= 300) {
         const errClassification = classifyHttpError(status);
         lastError = new Error(`LLM API ${status}: ${responseText.slice(0, 200)}`);
-        Zotero.debug(`[NER] attempt ${attempt + 1}/${MAX_RETRIES} failed: ${lastError.message} (${errClassification.kind})`);
+        Zotero.debug(`${logPrefix} attempt ${attempt + 1}/${maxRetries} failed: ${lastError.message} (${errClassification.kind})`);
 
-        if (!errClassification.retryable) throw lastError;
+        if (!errClassification.retryable) {
+          throw new NonRetryableLlmError(lastError.message);
+        }
 
         // Exponential backoff with jitter before retry
-        const backoff = BASE_BACKOFF_MS * Math.pow(2, attempt) + Math.random() * 500;
-        await new Promise(resolve => setTimeout(resolve, backoff));
+        if (attempt < maxRetries - 1) {
+          const backoff = BASE_BACKOFF_MS * Math.pow(2, attempt) + Math.random() * 500;
+          await new Promise(resolve => setTimeout(resolve, backoff));
+        }
         continue;
       }
 
-      const json = JSON.parse(responseText);
-      const content: string = json?.choices?.[0]?.message?.content ?? "";
-      if (!content) throw new Error("LLM returned empty content");
+      const trimmedResponseText = responseText.trim();
+      if (!trimmedResponseText) {
+        Zotero.debug(`${logPrefix} attempt ${attempt + 1}/${maxRetries}: successful response body was empty`);
+        throw new EmptyLlmContentError();
+      }
+
+      const json = JSON.parse(trimmedResponseText);
+      const content = extractMessageContent(json);
+      if (!content) {
+        Zotero.debug(`${logPrefix} attempt ${attempt + 1}/${maxRetries}: successful response had no usable content`);
+        throw new EmptyLlmContentError();
+      }
       return content;
 
     } catch (err: any) {
       if (!lastError || lastError.message !== err.message) {
         lastError = err;
-        Zotero.debug(`[NER] attempt ${attempt + 1}/${MAX_RETRIES}: ${err.message}`);
+        Zotero.debug(`${logPrefix} attempt ${attempt + 1}/${maxRetries}: ${err.message}`);
+      }
+
+      if (err instanceof EmptyLlmContentError) {
+        throw err;
+      }
+
+      if (err instanceof NonRetryableLlmError) {
+        throw err;
       }
 
       // Backoff before retry (unless it's a non-retryable error we already threw)
-      if (attempt < MAX_RETRIES - 1) {
+      if (attempt < maxRetries - 1) {
         const backoff = BASE_BACKOFF_MS * Math.pow(2, attempt) + Math.random() * 500;
         await new Promise(resolve => setTimeout(resolve, backoff));
       }
@@ -238,34 +479,35 @@ async function chatCompletion(messages: ChatMessage[]): Promise<string> {
 
 // ── Public API ───────────────────────────────────────────────────────
 
-export async function extractEntities(text: string): Promise<NerEntity[]> {
+export async function extractEntities(text: string, options: ExtractEntitiesOptions = {}): Promise<NerEntity[]> {
   if (!text.trim()) return [];
 
   const systemPrompt = getSystemPrompt();
+  const logPrefix = getLogPrefix(options.callerLabel);
 
   const rawResponse = await chatCompletion([
     { role: "system", content: systemPrompt },
     { role: "user", content: text },
-  ]);
+  ], options);
 
-  Zotero.debug(`[NER] raw LLM response (${rawResponse.length} chars): ${rawResponse.slice(0, 300)}`);
+  Zotero.debug(`${logPrefix} raw LLM response (${rawResponse.length} chars): ${rawResponse.slice(0, 300)}`);
 
   const jsonStr = extractJsonFromResponse(rawResponse);
-  Zotero.debug(`[NER] cleaned JSON (${jsonStr.length} chars): ${jsonStr.slice(0, 300)}`);
+  Zotero.debug(`${logPrefix} cleaned JSON (${jsonStr.length} chars): ${jsonStr.slice(0, 300)}`);
   
-  let parsed: { entities?: NerEntity[] };
+  let parsed: unknown;
   try {
     parsed = JSON.parse(jsonStr);
   } catch (err: any) {
     throw new Error(`Failed to parse LLM JSON response. Raw: "${rawResponse.slice(0, 150)}" | Cleaned: "${jsonStr.slice(0, 150)}" | Error: ${err.message}`);
   }
 
-  const rawEntities = parsed.entities;
+  const rawEntities = extractEntitiesArray(parsed);
   if (!Array.isArray(rawEntities)) {
-    throw new Error(`LLM response missing "entities" array`);
+    throw new Error(`LLM response missing usable "entities" array (parsed root: ${describeParsedRootShape(parsed)})`);
   }
 
   const validated = validateAndRepairEntities(rawEntities, text);
-  Zotero.debug(`[NER] extracted ${validated.length} valid entities from ${rawEntities.length} raw`);
+  Zotero.debug(`${logPrefix} extracted ${validated.length} valid entities from ${rawEntities.length} raw`);
   return validated;
 }

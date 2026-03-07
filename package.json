@@ -2,10 +2,22 @@
   "name": "zotero-pdf-highlighter",
   "version": "0.2.0",
   "description": "A Zotero 7 plugin for VS Code-like semantic PDF highlighting.",
+  "config": {
+    "addonName": "Zotero PDF Highlighter",
+    "addonID": "zotero-pdf-highlighter@memorushb.com",
+    "addonRef": "zotero-pdf-highlighter",
+    "addonInstance": "ZoteroPDFHighlighter",
+    "prefsPrefix": "extensions.zotero-pdf-highlighter"
+  },
   "main": "index.js",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1",
-    "build": "node build.js"
+    "postinstall": "node scripts/patch-zotero-plugin-scaffold-node25.mjs",
+    "prebuild": "node scripts/patch-zotero-plugin-scaffold-node25.mjs",
+    "start": "zotero-plugin serve",
+    "build": "zotero-plugin build && tsc --noEmit",
+    "build:legacy": "node build.js",
+    "release": "zotero-plugin release",
+    "test": "echo \"Error: no test specified\" && exit 1"
   },
   "repository": {
     "type": "git",
@@ -22,6 +34,7 @@
     "@types/firefox-webext-browser": "^143.0.0",
     "adm-zip": "^0.5.16",
     "esbuild": "^0.27.3",
-    "typescript": "^5.9.3"
+    "typescript": "^5.9.3",
+    "zotero-plugin-scaffold": "^0.8.3"
   }
 }
