@@ -7,6 +7,8 @@ export const PREF_PREFIX_MIGRATION_VERSION = '1';
 
 export type DensityLevel = 'sparse' | 'balanced' | 'dense';
 export type FocusMode = 'balanced' | 'results-first' | 'methods-first' | 'caveats-first';
+export type HighlightBackendMode = 'auto' | 'llm-preferred' | 'non-llm-only';
+export type NonLlmLexicalMethod = 'bm25' | 'tfidf';
 
 export const DEFAULT_SYSTEM_PROMPT = `You are a precision highlighting assistant for academic papers.
 
@@ -84,7 +86,9 @@ PRECISION POLICY
 export const PREF_DEFAULTS = {
     apiKey: '',
     baseURL: 'https://openrouter.ai/api/v1',
-    model: 'z-ai/glm-4.5-air:free',
+    model: 'meta-llama/llama-3.3-70b-instruct:free',
+    backendMode: 'auto',
+    nonLlmLexicalMethod: 'bm25',
     systemPrompt: '',
     globalSystemPrompt: '',
     density: 'balanced',

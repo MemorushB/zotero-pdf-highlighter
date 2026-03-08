@@ -319,7 +319,7 @@ function extractMessageContent(responseJson: any): string {
 async function chatCompletion(messages: ChatMessage[], options: LlmRequestOptions = {}): Promise<string> {
   const apiKey = getPref("apiKey");
   const baseURL = getPref("baseURL") || "https://openrouter.ai/api/v1";
-  const model = getPref("model") || "z-ai/glm-4.5-air:free";
+  const model = getPref("model") || "meta-llama/llama-3.3-70b-instruct:free";
   const timeoutMs = options.timeoutMs ?? REQUEST_TIMEOUT_MS;
   const maxRetries = options.maxRetries ?? MAX_RETRIES;
   const logPrefix = getLogPrefix(options.callerLabel);

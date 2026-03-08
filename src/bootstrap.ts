@@ -8,6 +8,7 @@ import {
     DEFAULT_SYSTEM_PROMPT,
     PREF_DEFAULTS,
     PREF_PREFIX_MIGRATION_VERSION,
+    getNonEmptyPreferenceValue,
     type PreferenceClearOutcome,
     type PreferenceBranchSnapshot,
     type PreferenceKey,
@@ -30,15 +31,19 @@ import {
     setPrefPrefixMigrationVersion,
 } from "./preferences";
 import {
+    extractSelectionHighlightsNonLlm,
     finalizeGlobalHighlightSelection,
     getQuickHighlightDefaults,
     inferSectionTitle,
+    inferHighlightReason,
     prepareGlobalHighlightSelection,
+    selectGlobalHighlightCandidateIdsNonLlm,
     validateQuickHighlightSpans,
     type PaperPageText,
     type PreparedGlobalHighlightSelection,
     type ReadingHighlightCandidate,
     type ReadingHighlightSpan,
+    type RankedHighlightSelection,
 } from "./reading-highlights";
 
 export interface BootstrapData {
@@ -68,6 +73,15 @@ const MATCH_OPENING_PUNCTUATION = new Set(['(', '[', '{']);
 const MATCH_TIGHT_LEADING_PUNCTUATION = new Set([')', ']', '}', ',', '.', ';', ':', '!', '?']);
 
 type PreferenceControl = HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement;
+type HighlightBackend = 'llm' | 'non-llm';
+
+interface HighlightBackendPolicy {
+    mode: string;
+    apiKeyConfigured: boolean;
+    initialBackend: HighlightBackend;
+    allowFallbackToNonLlm: boolean;
+    reason: string;
+}
 
 function getHighlightColor(reason?: string): string {
     const normalizedReason = reason?.toLowerCase() || '';
@@ -79,16 +93,37 @@ function getHighlightColor(reason?: string): string {
     return '#ffd400';
 }
 
-function inferReasonFromText(text: string): string {
-    const t = text.toLowerCase();
+function getHighlightBackendPolicy(): HighlightBackendPolicy {
+    const mode = getCanonicalPref('backendMode');
+    const apiKeyConfigured = getNonEmptyPreferenceValue(getCanonicalPref('apiKey')) !== null;
 
-    if (/\b(method|approach|algorithm|procedure|framework|pipeline|architecture|implementation|technique|protocol|workflow|fine-tun|train|pretrain)\b/.test(t)) return 'method';
-    if (/\b(result|finding|found|observe|show that|demonstrate|achiev|outperform|accuracy|performance|improvement|f1.score|precision|recall|bleu|rouge)\b/.test(t)) return 'result';
-    if (/\b(caveat|limitation|however|although|despite|drawback|shortcoming|fail|degrad|inconsisten|trade.?off|risk|bias|concern)\b/.test(t)) return 'caveat';
-    if (/\b(we propose|we introduce|we present|we argue|contribution|novel|first to|key insight|hypothesis|we claim|this paper)\b/.test(t)) return 'claim';
-    if (/\b(previous|prior work|related work|background|existing|established|well.known|widely used|traditionally|literature)\b/.test(t)) return 'background';
+    if (mode === 'non-llm-only') {
+        return {
+            mode,
+            apiKeyConfigured,
+            initialBackend: 'non-llm',
+            allowFallbackToNonLlm: false,
+            reason: 'backend-mode-non-llm-only',
+        };
+    }
 
-    return 'unknown';
+    if (!apiKeyConfigured) {
+        return {
+            mode,
+            apiKeyConfigured,
+            initialBackend: 'non-llm',
+            allowFallbackToNonLlm: false,
+            reason: 'missing-api-key',
+        };
+    }
+
+    return {
+        mode,
+        apiKeyConfigured,
+        initialBackend: 'llm',
+        allowFallbackToNonLlm: true,
+        reason: mode === 'llm-preferred' ? 'llm-preferred' : 'auto-with-api-key',
+    };
 }
 
 function isTextareaPreferenceControl(control: Element): boolean {
@@ -228,6 +263,44 @@ function registerPreferenceDefaults(): void {
         if (getCanonicalRawPref(key) === undefined) {
             setCanonicalPref(key, val);
         }
+    }
+}
+
+async function runHighlightBackendWithFallback<T>(
+    label: 'selection' | 'global',
+    runLlm: () => Promise<T>,
+    runNonLlm: () => T | Promise<T>
+): Promise<{ result: T; backend: HighlightBackend; usedFallback: boolean }> {
+    const policy = getHighlightBackendPolicy();
+    Zotero.debug(
+        `[Zotero PDF Highlighter] ${label} backend policy: mode=${policy.mode}, apiKeyConfigured=${policy.apiKeyConfigured ? 'yes' : 'no'}, initial=${policy.initialBackend}, reason=${policy.reason}`
+    );
+
+    if (policy.initialBackend === 'non-llm') {
+        return {
+            result: await runNonLlm(),
+            backend: 'non-llm',
+            usedFallback: false,
+        };
+    }
+
+    try {
+        return {
+            result: await runLlm(),
+            backend: 'llm',
+            usedFallback: false,
+        };
+    } catch (error: any) {
+        if (!policy.allowFallbackToNonLlm) {
+            throw error;
+        }
+
+        Zotero.debug(`[Zotero PDF Highlighter] ${label} LLM backend failed (${error?.message || error}); falling back to non-LLM`);
+        return {
+            result: await runNonLlm(),
+            backend: 'non-llm',
+            usedFallback: true,
+        };
     }
 }
 
@@ -1403,7 +1476,7 @@ async function createSelectionHighlightsFallback(
         try {
             const rects = computeSpanRects(text, baseRects, span.start, span.end);
             if (rects.length === 0) continue;
-            const reason = span.reason || inferReasonFromText(span.text);
+            const reason = span.reason || inferHighlightReason(span.text);
 
             const annotationKey = Zotero.DataObjectUtilities?.generateKey?.()
                 || Zotero.Utilities?.generateObjectKey?.()
@@ -1647,7 +1720,7 @@ async function createSelectionHighlightsWithCharPositions(
             let layer1SpanGeometryFailed = false;
             let layer2AttemptedForSpan = false;
             let layer2SpanGeometryFailed = false;
-            const reason = span.reason || inferReasonFromText(span.text);
+            const reason = span.reason || inferHighlightReason(span.text);
 
             let geometry: LayeredSpanGeometry | null = null;
 
@@ -1790,23 +1863,38 @@ async function createSelectionReadingHighlights(event: any, button: any): Promis
         setSelectionPopupProgress(button, 'analyzing-selection');
 
         const density = getCanonicalPref('density');
+        const lexicalMethod = getCanonicalPref('nonLlmLexicalMethod');
         const quickDefaults = getQuickHighlightDefaults(density);
 
         const selectionContext = await buildSelectionContext(reader, base, selectedText);
         let spans: ReadingHighlightSpan[];
         try {
-            const rawSpans = await extractSelectionHighlights({
-                selectionText: selectedText,
-                paperTitle: selectionContext.paperTitle,
-                sectionTitle: selectionContext.sectionTitle,
-                beforeContext: selectionContext.beforeContext,
-                afterContext: selectionContext.afterContext,
-            }, {
-                callerLabel: 'selection',
-                timeoutMs: SELECTION_HIGHLIGHT_REQUEST_TIMEOUT_MS,
-                maxRetries: SELECTION_HIGHLIGHT_REQUEST_ATTEMPTS,
-            }, quickDefaults.maxHighlights);
-            spans = validateQuickHighlightSpans(rawSpans, selectedText, density);
+            const backendResult = await runHighlightBackendWithFallback(
+                'selection',
+                async () => extractSelectionHighlights({
+                    selectionText: selectedText,
+                    paperTitle: selectionContext.paperTitle,
+                    sectionTitle: selectionContext.sectionTitle,
+                    beforeContext: selectionContext.beforeContext,
+                    afterContext: selectionContext.afterContext,
+                }, {
+                    callerLabel: 'selection',
+                    timeoutMs: SELECTION_HIGHLIGHT_REQUEST_TIMEOUT_MS,
+                    maxRetries: SELECTION_HIGHLIGHT_REQUEST_ATTEMPTS,
+                }, quickDefaults.maxHighlights),
+                () => extractSelectionHighlightsNonLlm({
+                    selectionText: selectedText,
+                    paperTitle: selectionContext.paperTitle,
+                    sectionTitle: selectionContext.sectionTitle,
+                    beforeContext: selectionContext.beforeContext,
+                    afterContext: selectionContext.afterContext,
+                }, {
+                    density,
+                    lexicalMethod,
+                })
+            );
+            spans = validateQuickHighlightSpans(backendResult.result, selectedText, density);
+            Zotero.debug(`[Zotero PDF Highlighter] Selection highlights resolved via ${backendResult.backend}${backendResult.usedFallback ? ' fallback' : ''}`);
         } catch (err: any) {
             Zotero.debug(`[Zotero PDF Highlighter] Selection highlight extraction failed: ${err?.message || err}`);
             showTemporaryButtonState(button, event, 'No highlight', 1800);
@@ -2655,6 +2743,8 @@ export function startup(data: BootstrapData, reason: number) {
                 'pref-apiKey': 'apiKey',
                 'pref-baseURL': 'baseURL',
                 'pref-model': 'model',
+                'pref-backendMode': 'backendMode',
+                'pref-nonLlmLexicalMethod': 'nonLlmLexicalMethod',
                 'pref-systemPrompt': 'systemPrompt',
                 'pref-globalSystemPrompt': 'globalSystemPrompt',
                 'pref-density': 'density',
@@ -2824,6 +2914,7 @@ export function startup(data: BootstrapData, reason: number) {
 
                 const density = getCanonicalPref('density');
                 const focusMode = getCanonicalPref('focusMode');
+                const lexicalMethod = getCanonicalPref('nonLlmLexicalMethod');
                 const minConfidence = parseFloat(getCanonicalPref('minConfidence')) || 0;
 
                 const pdfViewer = internal?._primaryView?._iframeWindow?.PDFViewerApplication?.pdfViewer;
@@ -2862,7 +2953,7 @@ export function startup(data: BootstrapData, reason: number) {
                     }
                 }
 
-                const preparedSelection: PreparedGlobalHighlightSelection = prepareGlobalHighlightSelection(pageTexts, density, focusMode);
+                const preparedSelection: PreparedGlobalHighlightSelection = prepareGlobalHighlightSelection(pageTexts, density, focusMode, paperTitle);
                 if (!preparedSelection.shortlist.length) {
                     button.textContent = 'No highlights';
                     setTimeout(() => { button.textContent = 'Smart Highlight All'; button.disabled = false; }, 2500);
@@ -2871,20 +2962,25 @@ export function startup(data: BootstrapData, reason: number) {
 
                 button.textContent = `Ranking ${preparedSelection.shortlist.length}...`;
 
-                let selectedHighlights: Array<{ id: string; reason?: string }> = [];
-                let usedHeuristicFallback = false;
+                let selectedHighlights: RankedHighlightSelection[] = [];
                 try {
-                    selectedHighlights = await selectGlobalHighlightCandidateIds(
-                        preparedSelection.shortlist,
-                        preparedSelection.maxHighlights,
-                        paperTitle,
-                        {
-                            callerLabel: 'toolbar',
-                            timeoutMs: GLOBAL_HIGHLIGHT_REQUEST_TIMEOUT_MS,
-                            maxRetries: GLOBAL_HIGHLIGHT_REQUEST_ATTEMPTS,
-                        },
-                        focusMode
+                    const backendResult = await runHighlightBackendWithFallback(
+                        'global',
+                        async () => selectGlobalHighlightCandidateIds(
+                            preparedSelection.shortlist,
+                            preparedSelection.maxHighlights,
+                            paperTitle,
+                            {
+                                callerLabel: 'toolbar',
+                                timeoutMs: GLOBAL_HIGHLIGHT_REQUEST_TIMEOUT_MS,
+                                maxRetries: GLOBAL_HIGHLIGHT_REQUEST_ATTEMPTS,
+                            },
+                            focusMode
+                        ),
+                        () => selectGlobalHighlightCandidateIdsNonLlm(preparedSelection, { lexicalMethod })
                     );
+                    selectedHighlights = backendResult.result;
+                    Zotero.debug(`[Zotero PDF Highlighter] Global ranking resolved via ${backendResult.backend}${backendResult.usedFallback ? ' fallback' : ''}`);
                     if (selectedHighlights.length) {
                         Zotero.debug(`[Zotero PDF Highlighter] Global ranking selected ${selectedHighlights.length} item(s)`);
                     } else {
@@ -2892,24 +2988,22 @@ export function startup(data: BootstrapData, reason: number) {
                     }
                 } catch (rankErr: any) {
                     Zotero.debug(`[Zotero PDF Highlighter] Global ranking failed: ${rankErr?.message || rankErr}`);
-                    selectedHighlights = preparedSelection.shortlist.map(candidate => ({ id: candidate.id, reason: candidate.reason }));
-                    usedHeuristicFallback = true;
-                    Zotero.debug('[Zotero PDF Highlighter] Global ranking failed; falling back to heuristic shortlist order');
+                    button.textContent = 'Error';
+                    setTimeout(() => { button.textContent = 'Smart Highlight All'; button.disabled = false; }, 2000);
+                    return;
                 }
 
                 const selectedIds = selectedHighlights.map(selection => selection.id);
                 const reasonById = new Map(selectedHighlights.map(selection => [selection.id, selection.reason]));
 
                 const finalCandidates = finalizeGlobalHighlightSelection(preparedSelection, selectedIds, minConfidence);
-                if (usedHeuristicFallback) {
-                    Zotero.debug(`[Zotero PDF Highlighter] Heuristic fallback produced ${finalCandidates.length} final candidate(s)`);
-                } else if (!selectedHighlights.length) {
+                if (!selectedHighlights.length) {
                     Zotero.debug('[Zotero PDF Highlighter] Global ranking produced 0 final candidates by design');
                 }
                 for (const candidate of finalCandidates) {
                     candidate.reason = reasonById.get(candidate.id) ?? candidate.reason;
                     if (!candidate.reason) {
-                        candidate.reason = inferReasonFromText(candidate.text);
+                        candidate.reason = inferHighlightReason(candidate.text);
                     }
                 }
                 if (!finalCandidates.length) {
