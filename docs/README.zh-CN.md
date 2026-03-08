@@ -1,4 +1,4 @@
-# Zotero PDF Highlighter
+# Zotero Smart Highlighter
 
 面向 Zotero 8 的智能 PDF 高亮插件，帮助你在阅读时快速标出最值得回看的观点、结果、方法与局限。
 
@@ -14,7 +14,7 @@ English README: [`../README.md`](../README.md)
 
 ## 安装
 
-1. 从仓库的 [Releases 页面](https://github.com/MemorushB/zotero-pdf-highlighter/releases) 下载最新的 `.xpi` 安装包。
+1. 从仓库的 [Releases 页面](https://github.com/MemorushB/zotero-smart-highlighter/releases) 下载最新的 `.xpi` 安装包。
 2. 在 Zotero 中打开 `Tools` -> `Plugins`。
 3. 点击右上角齿轮，选择 `Install Add-on From File...`，然后选中下载好的 `.xpi`。
 4. 如果 Zotero 提示重启，按提示完成即可。
