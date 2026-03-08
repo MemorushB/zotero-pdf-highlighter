@@ -45,6 +45,7 @@ SELECTION RUBRIC - a candidate must pass ALL gates:
 2. Scholarly value: The span carries specific, non-trivial information - a claim, finding, method detail, limitation, or defined concept. Generic transitions, boilerplate, or restatements of common knowledge do not qualify.
 3. Specificity: The span names concrete objects, quantities, relationships, or conditions rather than vague generalities.
 4. Non-redundancy: The span adds information not already covered by another selected candidate. If two candidates express substantially the same idea, keep only the more self-contained one.
+5. Not citation-list content: The span must not come from References, Bibliography, Works Cited, or other citation-list sections, and must not be a standalone citation-list entry even if it contains technical terms or appears content-rich.
 
 REASON TAXONOMY (assign exactly one)
 - claim: core contribution, hypothesis, or positioning statement

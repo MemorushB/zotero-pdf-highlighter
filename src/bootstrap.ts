@@ -17,6 +17,7 @@ import {
     getCanonicalPref,
     getCanonicalPrefKey,
     getCanonicalRawPref,
+    getLegacyDuplicatedPrefKey,
     getPrefPrefixMigrationVersion,
     isBlankDefaultEquivalentPreferenceValue,
     getStoredGlobalSystemPromptOverride,
@@ -87,7 +88,7 @@ function inferReasonFromText(text: string): string {
     if (/\b(we propose|we introduce|we present|we argue|contribution|novel|first to|key insight|hypothesis|we claim|this paper)\b/.test(t)) return 'claim';
     if (/\b(previous|prior work|related work|background|existing|established|well.known|widely used|traditionally|literature)\b/.test(t)) return 'background';
 
-    return 'result';
+    return 'unknown';
 }
 
 function isTextareaPreferenceControl(control: Element): boolean {
@@ -218,9 +219,9 @@ type SelectionPopupProgressStage = 'analyzing-selection' | 'preparing-geometry' 
 
 type SelectionPopupProgressHandler = (stage: SelectionPopupProgressStage) => void;
 
-const PREFERENCE_KEYS = Object.keys(PREF_DEFAULTS) as PreferenceKey[];
-
 // ── Preferences ──────────────────────────────────────────────────────
+
+const PREFERENCE_KEYS = Object.keys(PREF_DEFAULTS) as PreferenceKey[];
 
 function registerPreferenceDefaults(): void {
     for (const [key, val] of Object.entries(PREF_DEFAULTS) as Array<[PreferenceKey, string]>) {
@@ -2560,13 +2561,17 @@ async function createPaperHighlightAnnotation(
     attachment: any,
     pageIndex: number,
     candidate: ReadingHighlightCandidate,
-    charPositions: CharPosition[]
+    charPositions: CharPosition[],
+    pageText?: string
 ): Promise<boolean> {
     const internal = reader?._internalReader || reader;
+    const normalizedPageText = typeof pageText === 'string' && pageText.length
+        ? pageText
+        : charPositions.map(position => position.char).join('');
     const geometry = getSpanGeometryFromCharPositions(
         { mode: 'exact', rawStart: 0, rawOffsetBase: 0 },
         charPositions,
-        charPositions.map(position => position.char).join(''),
+        normalizedPageText,
         candidate.start,
         candidate.end
     );
@@ -2621,8 +2626,8 @@ export function install(data: BootstrapData, reason: number) {
 
 export function startup(data: BootstrapData, reason: number) {
     Zotero.debug("Zotero PDF Highlighter: startup");
-    migratePreferencePrefixIfNeeded();
 
+    migratePreferencePrefixIfNeeded();
     registerPreferenceDefaults();
 
     // Create global namespace for hooks (must be before PreferencePanes.register)
@@ -2809,6 +2814,7 @@ export function startup(data: BootstrapData, reason: number) {
 
                 const pageTexts: PaperPageText[] = [];
                 const pageCharPositions = new Map<number, CharPosition[]>();
+                const pageTextByIndex = new Map<number, string>();
 
                 for (let pageIdx = 0; pageIdx < totalPages; pageIdx++) {
                     try {
@@ -2831,6 +2837,7 @@ export function startup(data: BootstrapData, reason: number) {
 
                         pageTexts.push({ pageIndex: pageIdx, text: pageText });
                         pageCharPositions.set(pageIdx, charPositions);
+                        pageTextByIndex.set(pageIdx, pageText);
                     } catch (pageErr: any) {
                         Zotero.debug(`[Zotero PDF Highlighter] Error processing page ${pageIdx}: ${pageErr?.message}`);
                     }
@@ -2887,10 +2894,11 @@ export function startup(data: BootstrapData, reason: number) {
                 for (const candidate of finalCandidates) {
                     const charPositions = pageCharPositions.get(candidate.pageIndex);
                     if (!charPositions?.length) continue;
+                    const pageText = pageTextByIndex.get(candidate.pageIndex);
 
                     button.textContent = `Highlight ${totalCreated + 1}/${finalCandidates.length}`;
                     try {
-                        const created = await createPaperHighlightAnnotation(reader, attachment, candidate.pageIndex, candidate, charPositions);
+                        const created = await createPaperHighlightAnnotation(reader, attachment, candidate.pageIndex, candidate, charPositions, pageText);
                         if (created) totalCreated++;
                     } catch (candidateErr: any) {
                         Zotero.debug(`[Zotero PDF Highlighter] Failed to create global highlight for "${candidate.text}": ${candidateErr?.message || candidateErr}`);

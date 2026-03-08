@@ -422,7 +422,7 @@ async function requestJson<T>(messages: ChatMessage[], options: LlmRequestOption
   }
 }
 
-function coerceReadingHighlightSpans(response: SelectionHighlightResponse): ReadingHighlightSpan[] {
+function coerceReadingHighlightSpans(response: SelectionHighlightResponse, sourceText: string): ReadingHighlightSpan[] {
   if (!Array.isArray(response?.highlights)) {
     return [];
   }
@@ -431,8 +431,20 @@ function coerceReadingHighlightSpans(response: SelectionHighlightResponse): Read
     if (!highlight || typeof highlight !== "object") return [];
     if (typeof highlight.start !== "number" || typeof highlight.end !== "number") return [];
 
+    const safeStart = Math.max(0, Math.min(highlight.start, sourceText.length));
+    const safeEnd = Math.max(safeStart, Math.min(highlight.end, sourceText.length));
+    let normalizedText = typeof highlight.text === "string" ? highlight.text : "";
+
+    if (!normalizedText.trim() && safeEnd > safeStart) {
+      normalizedText = sourceText.slice(safeStart, safeEnd);
+    }
+
+    if (!normalizedText.trim()) {
+      return [];
+    }
+
     return [{
-      text: typeof highlight.text === "string" ? highlight.text : "",
+      text: normalizedText,
       start: highlight.start,
       end: highlight.end,
       reason: typeof highlight.reason === "string" ? highlight.reason : undefined,
@@ -524,7 +536,7 @@ export async function extractSelectionHighlights(
     { role: "user", content: buildSelectionUserPrompt(input, maxHighlights) },
   ], options);
 
-  return coerceReadingHighlightSpans(parsed);
+  return coerceReadingHighlightSpans(parsed, input.selectionText);
 }
 
 export async function selectGlobalHighlightCandidateIds(

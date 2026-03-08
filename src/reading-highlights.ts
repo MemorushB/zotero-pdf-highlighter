@@ -154,6 +154,8 @@ const NEGATIVE_PATTERNS: Array<[RegExp, number]> = [
     [/\([^)]*\d{4}[^)]*\)/, -2],
 ];
 
+const UNICODE_LETTER_OR_NUMBER_PATTERN = /[\p{L}\p{N}]/u;
+
 // ── Public API ───────────────────────────────────────────────────────
 
 export function getQuickHighlightDefaults(density: string = 'balanced'): QuickHighlightDefaults {
@@ -515,7 +517,7 @@ function scoreCandidate(text: string, sectionKind: ReadingSectionKind, focusMode
     if (words > 30) score -= 3;
     if (words > 22) score -= 1;
     if (/^\s*(we|our)\b/i.test(text)) score += 1;
-    if (!/[A-Za-z]/.test(text)) score -= 3;
+    if (!UNICODE_LETTER_OR_NUMBER_PATTERN.test(text)) score -= 3;
     if (countCitationMarkers(text) >= 2) score -= 3;
 
     return score;
@@ -576,10 +578,9 @@ function isReadableHighlight(text: string, minChars: number, maxChars: number, m
     if (!trimmed) return false;
     if (trimmed.length < minChars || trimmed.length > maxChars) return false;
     if (getWordCount(trimmed) > maxWords) return false;
-    if (/^[^A-Za-z0-9]+$/.test(trimmed)) return false;
+    if (!UNICODE_LETTER_OR_NUMBER_PATTERN.test(trimmed)) return false;
     if (/^(figure|table|equation|appendix)\b/i.test(trimmed)) return false;
     if (countCitationMarkers(trimmed) >= 2) return false;
-    if (!/[a-z]/i.test(trimmed)) return false;
     return true;
 }
 
