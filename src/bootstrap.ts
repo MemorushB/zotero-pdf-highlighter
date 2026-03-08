@@ -2662,7 +2662,7 @@ export function startup(data: BootstrapData, reason: number) {
                 'pref-minConfidence': 'minConfidence',
             };
 
-            const handlers: Array<{ el: Element; type: string; fn: () => void }> = [];
+            const handlers: Array<{ el: Element; type: string; fn: EventListener }> = [];
 
             for (const [inputId, prefKey] of Object.entries(inputs)) {
                 const input = doc.getElementById(inputId) as PreferenceControl | null;
@@ -2743,9 +2743,28 @@ export function startup(data: BootstrapData, reason: number) {
                     setAdvancedToggleExpanded(expanded);
                 };
 
+                const handleAdvancedToggleKeydown: EventListener = (event) => {
+                    if (!(event instanceof KeyboardEvent)) {
+                        return;
+                    }
+
+                    if (event.key === 'Enter') {
+                        event.preventDefault();
+                        toggleAdvancedSettings();
+                        return;
+                    }
+
+                    if (event.key === ' ') {
+                        event.preventDefault();
+                        toggleAdvancedSettings();
+                    }
+                };
+
                 setAdvancedToggleExpanded(advContent.style.display !== 'none');
                 advToggle.addEventListener('click', toggleAdvancedSettings);
+                advToggle.addEventListener('keydown', handleAdvancedToggleKeydown);
                 handlers.push({ el: advToggle, type: 'click', fn: toggleAdvancedSettings });
+                handlers.push({ el: advToggle, type: 'keydown', fn: handleAdvancedToggleKeydown });
             }
 
             // Store cleanup function
@@ -2853,6 +2872,7 @@ export function startup(data: BootstrapData, reason: number) {
                 button.textContent = `Ranking ${preparedSelection.shortlist.length}...`;
 
                 let selectedHighlights: Array<{ id: string; reason?: string }> = [];
+                let usedHeuristicFallback = false;
                 try {
                     selectedHighlights = await selectGlobalHighlightCandidateIds(
                         preparedSelection.shortlist,
@@ -2865,19 +2885,27 @@ export function startup(data: BootstrapData, reason: number) {
                         },
                         focusMode
                     );
+                    if (selectedHighlights.length) {
+                        Zotero.debug(`[Zotero PDF Highlighter] Global ranking selected ${selectedHighlights.length} item(s)`);
+                    } else {
+                        Zotero.debug('[Zotero PDF Highlighter] Global ranking intentionally selected 0 item(s)');
+                    }
                 } catch (rankErr: any) {
                     Zotero.debug(`[Zotero PDF Highlighter] Global ranking failed: ${rankErr?.message || rankErr}`);
-                }
-
-                if (!selectedHighlights.length) {
                     selectedHighlights = preparedSelection.shortlist.map(candidate => ({ id: candidate.id, reason: candidate.reason }));
-                    Zotero.debug('[Zotero PDF Highlighter] Global ranking yielded no IDs; falling back to heuristic shortlist order');
+                    usedHeuristicFallback = true;
+                    Zotero.debug('[Zotero PDF Highlighter] Global ranking failed; falling back to heuristic shortlist order');
                 }
 
                 const selectedIds = selectedHighlights.map(selection => selection.id);
                 const reasonById = new Map(selectedHighlights.map(selection => [selection.id, selection.reason]));
 
                 const finalCandidates = finalizeGlobalHighlightSelection(preparedSelection, selectedIds, minConfidence);
+                if (usedHeuristicFallback) {
+                    Zotero.debug(`[Zotero PDF Highlighter] Heuristic fallback produced ${finalCandidates.length} final candidate(s)`);
+                } else if (!selectedHighlights.length) {
+                    Zotero.debug('[Zotero PDF Highlighter] Global ranking produced 0 final candidates by design');
+                }
                 for (const candidate of finalCandidates) {
                     candidate.reason = reasonById.get(candidate.id) ?? candidate.reason;
                     if (!candidate.reason) {
