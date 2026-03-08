@@ -10,27 +10,29 @@
     <html:div class="pref-row">
       <html:label data-l10n-id="pref-density-label" class="pref-label">Highlight Density:</html:label>
       <html:select id="pref-density" class="pref-select">
-        <html:option value="sparse">Sparse - fewer, high-confidence highlights</html:option>
-        <html:option value="balanced" selected="selected">Balanced - moderate coverage</html:option>
-        <html:option value="dense">Dense - comprehensive highlights</html:option>
+        <html:option value="sparse" data-l10n-id="pref-density-option-sparse">Sparse - fewer, high-confidence highlights</html:option>
+        <html:option value="balanced" selected="selected" data-l10n-id="pref-density-option-balanced">Balanced - moderate coverage</html:option>
+        <html:option value="dense" data-l10n-id="pref-density-option-dense">Dense - comprehensive highlights</html:option>
       </html:select>
     </html:div>
 
     <html:div class="pref-row">
       <html:label data-l10n-id="pref-focus-label" class="pref-label">Reading Focus:</html:label>
       <html:select id="pref-focusMode" class="pref-select">
-        <html:option value="balanced" selected="selected">Balanced</html:option>
-        <html:option value="results-first">Results &amp; Evidence</html:option>
-        <html:option value="methods-first">Methods &amp; Design</html:option>
-        <html:option value="caveats-first">Caveats &amp; Limitations</html:option>
+        <html:option value="balanced" selected="selected" data-l10n-id="pref-focus-option-balanced">Balanced</html:option>
+        <html:option value="results-first" data-l10n-id="pref-focus-option-results-first">Results &amp; Evidence</html:option>
+        <html:option value="methods-first" data-l10n-id="pref-focus-option-methods-first">Methods &amp; Design</html:option>
+        <html:option value="caveats-first" data-l10n-id="pref-focus-option-caveats-first">Caveats &amp; Limitations</html:option>
       </html:select>
     </html:div>
 
     <html:p data-l10n-id="pref-main-hint" class="pref-hint">Density controls how many highlights are created. Focus adjusts which sections are prioritized.</html:p>
 
     <html:div class="advanced-section">
-      <html:div id="advanced-toggle" class="advanced-toggle"
-                onclick="var content = document.getElementById('advanced-content'); if (!content) { for (var f of document.querySelectorAll('iframe')) { try { content = f.contentDocument.getElementById('advanced-content'); } catch(e){} } } if (content) { var hidden = content.style.display === 'none'; content.style.display = hidden ? '' : 'none'; this.textContent = hidden ? '\u25BC Advanced Settings' : '\u25B6 Advanced Settings'; }">&#x25B6; Advanced Settings</html:div>
+      <html:div id="advanced-toggle" class="advanced-toggle" role="button" tabindex="0" aria-expanded="false">
+        <html:span id="advanced-toggle-arrow" aria-hidden="true">&#x25B6;</html:span>
+        <html:span data-l10n-id="pref-advanced-toggle">Advanced Settings</html:span>
+      </html:div>
 
       <html:div id="advanced-content" style="display:none;">
         <html:h3 data-l10n-id="pref-api-section">LLM Connection</html:h3>

@@ -2717,7 +2717,31 @@ export function startup(data: BootstrapData, reason: number) {
 
             const advToggle = doc.getElementById('advanced-toggle') as HTMLElement | null;
             const advContent = doc.getElementById('advanced-content') as HTMLElement | null;
+            const advToggleArrow = doc.getElementById('advanced-toggle-arrow') as HTMLElement | null;
             Zotero.debug(`[Zotero PDF Highlighter] advanced toggle elements: toggle=${!!advToggle}, content=${!!advContent}`);
+
+            const setAdvancedToggleExpanded = (expanded: boolean): void => {
+                if (advContent) {
+                    advContent.style.display = expanded ? '' : 'none';
+                }
+                if (advToggleArrow) {
+                    advToggleArrow.textContent = expanded ? '\u25BC' : '\u25B6';
+                }
+                if (advToggle) {
+                    advToggle.setAttribute('aria-expanded', expanded ? 'true' : 'false');
+                }
+            };
+
+            if (advToggle && advContent) {
+                const toggleAdvancedSettings = () => {
+                    const expanded = advContent.style.display === 'none';
+                    setAdvancedToggleExpanded(expanded);
+                };
+
+                setAdvancedToggleExpanded(advContent.style.display !== 'none');
+                advToggle.addEventListener('click', toggleAdvancedSettings);
+                handlers.push({ el: advToggle, type: 'click', fn: toggleAdvancedSettings });
+            }
 
             // Store cleanup function
             Zotero.ZoteroPDFHighlighter.hooks._prefsCleanup = () => {

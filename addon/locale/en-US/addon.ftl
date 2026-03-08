@@ -1,6 +1,13 @@
 pref-title = Smart Highlight
 pref-density-label = Highlight Density:
+pref-density-option-sparse = Sparse - fewer, high-confidence highlights
+pref-density-option-balanced = Balanced - moderate coverage
+pref-density-option-dense = Dense - comprehensive highlights
 pref-focus-label = Reading Focus:
+pref-focus-option-balanced = Balanced
+pref-focus-option-results-first = Results & Evidence
+pref-focus-option-methods-first = Methods & Design
+pref-focus-option-caveats-first = Caveats & Limitations
 pref-main-hint = Density controls how many highlights are created. Focus adjusts which sections are prioritized.
 pref-advanced-toggle = Advanced Settings
 pref-api-section = LLM Connection

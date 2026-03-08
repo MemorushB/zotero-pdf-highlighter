@@ -1,6 +1,13 @@
 pref-title = 智能高亮
 pref-density-label = 高亮密度：
+pref-density-option-sparse = 稀疏 - 更少、更高置信度的高亮
+pref-density-option-balanced = 平衡 - 适中的覆盖范围
+pref-density-option-dense = 密集 - 更全面的高亮
 pref-focus-label = 阅读关注点：
+pref-focus-option-balanced = 平衡
+pref-focus-option-results-first = 结果与证据
+pref-focus-option-methods-first = 方法与设计
+pref-focus-option-caveats-first = 局限与注意事项
 pref-main-hint = 密度控制高亮的数量。关注点调整哪些章节被优先高亮。
 pref-advanced-toggle = 高级设置
 pref-api-section = LLM 连接
