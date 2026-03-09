@@ -62,6 +62,7 @@ export interface NonLlmSelectionInput {
     sectionTitle?: string | null;
     beforeContext?: string;
     afterContext?: string;
+    authorKeywords?: string[];
 }
 
 export interface NonLlmSelectionOptions {
@@ -71,6 +72,7 @@ export interface NonLlmSelectionOptions {
 
 export interface NonLlmGlobalSelectionOptions {
     lexicalMethod?: string;
+    authorKeywords?: string[];
 }
 
 interface RankedSpanCandidate extends ReadingHighlightSpan {
@@ -105,6 +107,8 @@ interface LexicalDocument {
     termCounts: Map<string, number>;
     length: number;
 }
+
+type ZoteroDebugFunction = ((message: string) => void) | undefined;
 
 type NoSpaceScriptKind = 'cjk' | 'southeast-asian';
 
@@ -389,6 +393,14 @@ export function extractSelectionHighlightsNonLlm(
             return left.start - right.start;
         });
 
+    const zoteroDebug = getZoteroDebug();
+    if (zoteroDebug) {
+        zoteroDebug(`[Smart Highlighter selection] candidates=${candidates.length} pseudoQuery="${pseudoQuery.slice(0, 80)}..." threshold=0.22`);
+        for (const candidate of ranked.slice(0, 5)) {
+            zoteroDebug(`[Smart Highlighter selection]   score=${candidate.finalScore.toFixed(3)} h=${candidate.heuristicScore.toFixed(3)} l=${candidate.lexicalScore.toFixed(3)} "${candidate.text.slice(0, 50)}..."`);
+        }
+    }
+
     return validateQuickHighlightSpans(ranked, input.selectionText, density);
 }
 
@@ -396,7 +408,8 @@ export function prepareGlobalHighlightSelection(
     pages: PaperPageText[],
     density: string = 'balanced',
     focusMode: string = 'balanced',
-    paperTitle?: string | null
+    paperTitle?: string | null,
+    authorKeywords?: string[]
 ): PreparedGlobalHighlightSelection {
     const defaults = getGlobalHighlightDefaults(pages.length, density);
     const config = getDensityConfig(density);
@@ -408,7 +421,7 @@ export function prepareGlobalHighlightSelection(
         shortlist,
         maxHighlights: defaults.maxHighlights,
         maxPerPage: defaults.maxPerPage,
-        pseudoQuery: buildGlobalPseudoQuery(pages, candidates, paperTitle),
+        pseudoQuery: buildGlobalPseudoQuery(pages, candidates, paperTitle, authorKeywords),
     };
 }
 
@@ -450,11 +463,41 @@ export function selectGlobalHighlightCandidateIdsNonLlm(
             return left.start - right.start;
         });
 
+    const zoteroDebug = getZoteroDebug();
+    if (zoteroDebug) {
+        zoteroDebug(`[Smart Highlighter global] shortlist=${prepared.shortlist.length} pseudoQuery="${prepared.pseudoQuery.slice(0, 80)}..." threshold=0.2`);
+        const topCandidates = rankedCandidates.slice(0, 10);
+        for (const candidate of topCandidates) {
+            zoteroDebug(`[Smart Highlighter global]   id=${candidate.id} score=${candidate.finalScore.toFixed(3)} h=${candidate.heuristicScore.toFixed(3)} l=${candidate.lexicalScore.toFixed(3)} reason=${candidate.reason || 'none'} section=${candidate.sectionKind} "${candidate.text.slice(0, 50)}..."`);
+        }
+    }
+
     return rankedCandidates.map(candidate => ({
         id: candidate.id,
         reason: candidate.reason,
     }));
 }
+
+// Phase 2.3 Evaluation: LexRank/TextRank graph centrality bonus
+//
+// Decision (2026-03-09): Deferred to Phase 3.
+//
+// Rationale: The graph centrality bonus requires building a sentence-pair
+// cosine similarity matrix and computing PageRank/power iteration. For a
+// typical paper with ~200 candidate sentences, this means ~20,000 pairwise
+// comparisons using tokenized term vectors. The computational cost is
+// significant for the non-LLM path which targets instant feedback.
+//
+// The existing three-signal pipeline (heuristic + lexical + future neural
+// reranker in Phase 3) is expected to provide sufficient ranking quality.
+// Graph centrality would be most valuable as a signal for the neural
+// reranker's pseudo-query construction, not as a standalone scoring feature.
+//
+// If revisited, implementation should:
+// 1. Use TF-IDF vectors (already available) for pairwise cosine similarity
+// 2. Apply power iteration (not full eigen decomposition) for efficiency
+// 3. Only compute for full-paper mode (not selection mode)
+// 4. Add the centrality score as graph_bonus in the global scoring formula
 
 export function finalizeGlobalHighlightSelection(
     prepared: PreparedGlobalHighlightSelection,
@@ -738,6 +781,10 @@ function classifySectionKind(sectionTitle: string): ReadingSectionKind {
     return 'other';
 }
 
+function getZoteroDebug(): ZoteroDebugFunction {
+    return (globalThis as { Zotero?: { debug?: (message: string) => void } }).Zotero?.debug;
+}
+
 function isSentenceBoundaryAt(text: string, index: number): boolean {
     const current = text[index] ?? '';
     const isAsciiBoundary = ASCII_SENTENCE_END_PATTERN.test(current);
@@ -874,6 +921,11 @@ function scoreCandidate(text: string, sectionKind: ReadingSectionKind, focusMode
     if (!UNICODE_LETTER_OR_NUMBER_PATTERN.test(text)) score -= 3;
     if (countCitationMarkers(text) >= 2) score -= 3;
     if (countAmbiguousPronouns(text) >= 2) score -= 2;
+
+    const zoteroDebug = getZoteroDebug();
+    if (zoteroDebug && score >= 3) {
+        zoteroDebug(`[Smart Highlighter scoring] section=${sectionKind} score=${score.toFixed(2)} text="${text.slice(0, 60)}..."`);
+    }
 
     return score;
 }
@@ -1044,6 +1096,10 @@ function buildSelectionPseudoQuery(input: NonLlmSelectionInput): string {
         contextTerms.join(' '),
     ].filter(Boolean);
 
+    if (input.authorKeywords?.length) {
+        queryParts.push(...input.authorKeywords.slice(0, 6));
+    }
+
     if (!queryParts.length) {
         queryParts.push(fallbackTerms.join(' '));
     }
@@ -1054,7 +1110,8 @@ function buildSelectionPseudoQuery(input: NonLlmSelectionInput): string {
 function buildGlobalPseudoQuery(
     pages: PaperPageText[],
     candidates: ReadingHighlightCandidate[],
-    paperTitle?: string | null
+    paperTitle?: string | null,
+    authorKeywords?: string[]
 ): string {
     const headings = pages.flatMap(page => extractSectionHeadings(page.text))
         .filter(heading => heading.kind !== 'references')
@@ -1064,14 +1121,20 @@ function buildGlobalPseudoQuery(
         .sort((left, right) => right.heuristicScore - left.heuristicScore)
         .slice(0, 6)
         .map(candidate => candidate.text);
-    const keywordPool = [
+    const keywordPool: string[] = [];
+
+    if (authorKeywords?.length) {
+        keywordPool.push(...authorKeywords.slice(0, 10));
+    }
+
+    keywordPool.push(
         paperTitle?.trim() || '',
         headings.slice(0, 12).join(' '),
         abstractSnippets.join(' '),
         extractTopTerms(candidates.map(candidate => candidate.text).join(' '), 24).join(' '),
-    ].filter(Boolean);
+    );
 
-    return keywordPool.join(' ');
+    return keywordPool.filter(Boolean).join(' ');
 }
 
 function extractTopTerms(text: string, limit: number): string[] {

@@ -46,6 +46,44 @@ import {
     type RankedHighlightSelection,
 } from "./reading-highlights";
 
+function extractAuthorKeywords(parentItem: any): string[] {
+    const keywords: string[] = [];
+
+    try {
+        const tags = parentItem?.getTags?.();
+        if (Array.isArray(tags)) {
+            for (const tag of tags) {
+                const name = typeof tag === 'string' ? tag : tag?.tag;
+                if (name && typeof name === 'string' && name.length > 1 && name.length < 80) {
+                    keywords.push(name.trim());
+                }
+            }
+        }
+    } catch (_) {}
+
+    try {
+        const extra = parentItem?.getField?.('extra');
+        if (typeof extra === 'string') {
+            const keywordMatch = extra.match(/^keywords?\s*[:：]\s*(.+)$/im);
+            if (keywordMatch) {
+                const terms = keywordMatch[1]
+                    .split(/[,;，；]/)
+                    .map((term: string) => term.trim())
+                    .filter((term: string) => term.length > 1 && term.length < 80);
+                keywords.push(...terms);
+            }
+        }
+    } catch (_) {}
+
+    const seen = new Set<string>();
+    return keywords.filter(keyword => {
+        const lowerKeyword = keyword.toLowerCase();
+        if (seen.has(lowerKeyword)) return false;
+        seen.add(lowerKeyword);
+        return true;
+    });
+}
+
 let pluginRootURI = '';
 
 export interface BootstrapData {
@@ -613,11 +651,15 @@ function getReaderAttachment(reader: any): any {
     return reader?._item ?? null;
 }
 
-function getPaperTitle(reader: any): string | null {
-    const attachment = getReaderAttachment(reader);
-    const parentItem = typeof attachment?.parentItem === 'function'
+function getParentItemFromAttachment(attachment: any): any {
+    return typeof attachment?.parentItem === 'function'
         ? attachment.parentItem()
         : attachment?.parentItem ?? null;
+}
+
+function getPaperTitle(reader: any): string | null {
+    const attachment = getReaderAttachment(reader);
+    const parentItem = getParentItemFromAttachment(attachment);
 
     const title = parentItem?.getField?.('title')
         ?? attachment?.getField?.('title')
@@ -1880,6 +1922,9 @@ async function createSelectionReadingHighlights(event: any, button: any): Promis
         const density = getCanonicalPref('density');
         const lexicalMethod = getCanonicalPref('nonLlmLexicalMethod');
         const quickDefaults = getQuickHighlightDefaults(density);
+        const attachment = getReaderAttachment(reader);
+        const parentItem = getParentItemFromAttachment(attachment);
+        const authorKeywords = extractAuthorKeywords(parentItem);
 
         const selectionContext = await buildSelectionContext(reader, base, selectedText);
         let spans: ReadingHighlightSpan[];
@@ -1903,6 +1948,7 @@ async function createSelectionReadingHighlights(event: any, button: any): Promis
                     sectionTitle: selectionContext.sectionTitle,
                     beforeContext: selectionContext.beforeContext,
                     afterContext: selectionContext.afterContext,
+                    authorKeywords,
                 }, {
                     density,
                     lexicalMethod,
@@ -2949,7 +2995,9 @@ export function startup(data: BootstrapData, reason: number) {
             try {
                 const internal = reader?._internalReader;
                 const attachment = getReaderAttachment(reader);
+                const parentItem = getParentItemFromAttachment(attachment);
                 const paperTitle = getPaperTitle(reader);
+                const authorKeywords = extractAuthorKeywords(parentItem);
 
                 const density = getCanonicalPref('density');
                 const focusMode = getCanonicalPref('focusMode');
@@ -2992,7 +3040,13 @@ export function startup(data: BootstrapData, reason: number) {
                     }
                 }
 
-                const preparedSelection: PreparedGlobalHighlightSelection = prepareGlobalHighlightSelection(pageTexts, density, focusMode, paperTitle);
+                const preparedSelection: PreparedGlobalHighlightSelection = prepareGlobalHighlightSelection(
+                    pageTexts,
+                    density,
+                    focusMode,
+                    paperTitle,
+                    authorKeywords
+                );
                 if (!preparedSelection.shortlist.length) {
                     setButtonText(button, 'No highlights');
                     setTimeout(() => { setButtonText(button, 'Smart Highlight All'); button.disabled = false; }, 2500);
@@ -3016,7 +3070,7 @@ export function startup(data: BootstrapData, reason: number) {
                             },
                             focusMode
                         ),
-                        () => selectGlobalHighlightCandidateIdsNonLlm(preparedSelection, { lexicalMethod })
+                        () => selectGlobalHighlightCandidateIdsNonLlm(preparedSelection, { lexicalMethod, authorKeywords })
                     );
                     selectedHighlights = backendResult.result;
                     Zotero.debug(`[Zotero Smart Highlighter] Global ranking resolved via ${backendResult.backend}${backendResult.usedFallback ? ' fallback' : ''}`);
