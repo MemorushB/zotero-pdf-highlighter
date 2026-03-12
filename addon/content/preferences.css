@@ -64,6 +64,9 @@
     font-family: monospace;
     font-size: 12px;
     padding: 6px;
+    line-height: 1.45;
+    min-height: 14em;
+    resize: vertical;
 }
 
 .pref-hint {
@@ -84,15 +87,137 @@
 }
 
 .advanced-toggle {
+    display: flex;
+    align-items: center;
+    gap: 6px;
     cursor: pointer;
     font-weight: bold;
     font-size: 13px;
     padding: 6px 0;
     user-select: none;
+    list-style: none;
+}
+
+.advanced-toggle::-webkit-details-marker {
+    display: none;
+}
+
+.advanced-toggle::marker {
+    content: "";
 }
 
 .advanced-toggle:hover {
     opacity: 0.7;
+}
+
+.advanced-section[open] .advanced-toggle #advanced-toggle-arrow {
+    transform: rotate(90deg);
+}
+
+#advanced-toggle-arrow {
+    display: inline-block;
+    transition: transform 120ms ease;
+}
+
+/* Neural Reranker section */
+.pref-section-heading {
+    font-weight: bold;
+    font-size: 12px;
+    margin-top: 12px;
+    margin-bottom: 6px;
+    color: #333;
+    border-bottom: 1px solid #ddd;
+    padding-bottom: 4px;
+}
+
+.pref-status-badge {
+    display: inline-block;
+    font-size: 11px;
+    padding: 2px 8px;
+    border-radius: 10px;
+    background: #e0e0e0;
+    color: #555;
+}
+
+.pref-status-badge.status-ready {
+    background: #d4edda;
+    color: #155724;
+}
+
+.pref-status-badge.status-disabled {
+    background: #e2e3e5;
+    color: #41464b;
+}
+
+.pref-status-badge.status-not-installed {
+    background: #e9ecef;
+    color: #495057;
+}
+
+.pref-status-badge.status-not-supported {
+    background: #f8d7da;
+    color: #721c24;
+}
+
+.pref-status-badge.status-downloading,
+.pref-status-badge.status-verifying,
+.pref-status-badge.status-extracting {
+    background: #fff3cd;
+    color: #856404;
+}
+
+.pref-status-badge.status-corrupt,
+.pref-status-badge.status-incompatible,
+.pref-status-badge.status-failed {
+    background: #f8d7da;
+    color: #721c24;
+}
+
+.pref-neural-status-group {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 4px;
+}
+
+.pref-neural-message {
+    margin: 0;
+}
+
+.pref-neural-message.is-error {
+    color: #a61e2b;
+    font-weight: 600;
+}
+
+.pref-neural-actions {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: wrap;
+}
+
+.pref-download-group {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.pref-button {
+    padding: 4px 12px;
+    font-size: 11px;
+    border: 1px solid #ccc;
+    border-radius: 4px;
+    background: #f5f5f5;
+    cursor: pointer;
+}
+
+.pref-button:hover {
+    background: #e8e8e8;
+}
+
+.pref-button:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
 }
 
 @media (prefers-color-scheme: dark) {
@@ -102,5 +227,63 @@
 
     .pref-inline-hint {
         color: #aaa;
+    }
+
+    .pref-section-heading {
+        color: #ccc;
+        border-bottom-color: #555;
+    }
+
+    .pref-status-badge {
+        background: #444;
+        color: #aaa;
+    }
+
+    .pref-status-badge.status-ready {
+        background: #1e4620;
+        color: #75b798;
+    }
+
+    .pref-status-badge.status-disabled {
+        background: #343a40;
+        color: #ced4da;
+    }
+
+    .pref-status-badge.status-not-installed {
+        background: #2f353a;
+        color: #ced4da;
+    }
+
+    .pref-status-badge.status-not-supported {
+        background: #4a1c24;
+        color: #ea868f;
+    }
+
+    .pref-status-badge.status-downloading,
+    .pref-status-badge.status-verifying,
+    .pref-status-badge.status-extracting {
+        background: #4a3c04;
+        color: #e2c65e;
+    }
+
+    .pref-status-badge.status-corrupt,
+    .pref-status-badge.status-incompatible,
+    .pref-status-badge.status-failed {
+        background: #4a1c24;
+        color: #ea868f;
+    }
+
+    .pref-button {
+        background: #444;
+        border-color: #666;
+        color: #ddd;
+    }
+
+    .pref-button:hover {
+        background: #555;
+    }
+
+    .pref-neural-message.is-error {
+        color: #ff9aa2;
     }
 }

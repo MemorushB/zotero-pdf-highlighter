@@ -9,6 +9,21 @@ export type DensityLevel = 'sparse' | 'balanced' | 'dense';
 export type FocusMode = 'balanced' | 'results-first' | 'methods-first' | 'caveats-first';
 export type HighlightBackendMode = 'auto' | 'llm-preferred' | 'non-llm-only';
 export type NonLlmLexicalMethod = 'bm25' | 'tfidf';
+export type PreferenceValue = string | boolean;
+
+export interface PreferenceDefaults {
+    apiKey: string;
+    baseURL: string;
+    model: string;
+    backendMode: HighlightBackendMode;
+    nonLlmLexicalMethod: NonLlmLexicalMethod;
+    systemPrompt: string;
+    globalSystemPrompt: string;
+    density: DensityLevel;
+    focusMode: FocusMode;
+    minConfidence: string;
+    neuralReranker: boolean;
+}
 
 export const DEFAULT_SYSTEM_PROMPT = `You are a precision highlighting assistant for academic papers.
 
@@ -83,7 +98,7 @@ PRECISION POLICY
 - If no candidate clearly satisfies the rubric, return {"selections":[]}.
 - Do not invent IDs. Only return IDs present in the candidate list.`;
 
-export const PREF_DEFAULTS = {
+export const PREF_DEFAULTS: PreferenceDefaults = {
     apiKey: '',
     baseURL: 'https://openrouter.ai/api/v1',
     model: 'meta-llama/llama-3.3-70b-instruct:free',
@@ -94,6 +109,7 @@ export const PREF_DEFAULTS = {
     density: 'balanced',
     focusMode: 'balanced',
     minConfidence: '0.5',
+    neuralReranker: true,
 } as const;
 
 const BLANK_DEFAULT_EQUIVALENT_PREFERENCES = new Set<PreferenceKey>(['minConfidence']);
@@ -105,10 +121,10 @@ export type PreferenceBranchState = 'missing' | 'default-equivalent' | 'non-defa
 
 export interface PreferenceBranchSnapshot {
     key: PreferenceKey;
-    canonicalRaw: string | undefined;
-    legacyRaw: string | undefined;
-    canonicalNormalized: string | null;
-    legacyNormalized: string | null;
+    canonicalRaw: PreferenceValue | undefined;
+    legacyRaw: PreferenceValue | undefined;
+    canonicalNormalized: PreferenceValue | null;
+    legacyNormalized: PreferenceValue | null;
     canonicalState: PreferenceBranchState;
     legacyState: PreferenceBranchState;
 }
@@ -125,11 +141,11 @@ export function getGlobalPrefByFullKey(fullKey: string): unknown {
     return Zotero.Prefs.get(fullKey, true);
 }
 
-export function setGlobalPrefByFullKey(fullKey: string, value: string): void {
+export function setGlobalPrefByFullKey(fullKey: string, value: PreferenceValue): void {
     Zotero.Prefs.set(fullKey, value, true);
 }
 
-export function clearGlobalPrefByFullKey(fullKey: string, fallbackValue = ''): PreferenceClearOutcome {
+export function clearGlobalPrefByFullKey(fullKey: string, fallbackValue: PreferenceValue = ''): PreferenceClearOutcome {
     if (typeof Zotero.Prefs.clear === 'function') {
         Zotero.Prefs.clear(fullKey, true);
         return 'cleared';
@@ -139,30 +155,34 @@ export function clearGlobalPrefByFullKey(fullKey: string, fallbackValue = ''): P
     return 'default-equivalent-written';
 }
 
-function getRawStringPrefByFullKey(fullKey: string): string | undefined {
+function getRawPrefByFullKey(fullKey: string): PreferenceValue | undefined {
     const value = getGlobalPrefByFullKey(fullKey);
     if (value === undefined) {
         return undefined;
     }
 
-    return typeof value === 'string' ? value : String(value);
+    if (typeof value === 'boolean' || typeof value === 'string') {
+        return value;
+    }
+
+    return String(value);
 }
 
-export function getCanonicalRawPref(key: PreferenceKey): string | undefined {
-    return getRawStringPrefByFullKey(getCanonicalPrefKey(key));
+export function getCanonicalRawPref<K extends PreferenceKey>(key: K): (typeof PREF_DEFAULTS)[K] | undefined {
+    return getRawPrefByFullKey(getCanonicalPrefKey(key)) as (typeof PREF_DEFAULTS)[K] | undefined;
 }
 
-export function getLegacyRawPref(key: PreferenceKey): string | undefined {
-    return getRawStringPrefByFullKey(getLegacyDuplicatedPrefKey(key));
+export function getLegacyRawPref<K extends PreferenceKey>(key: K): (typeof PREF_DEFAULTS)[K] | undefined {
+    return getRawPrefByFullKey(getLegacyDuplicatedPrefKey(key)) as (typeof PREF_DEFAULTS)[K] | undefined;
 }
 
-export function getCanonicalPref(key: PreferenceKey): string {
+export function getCanonicalPref<K extends PreferenceKey>(key: K): (typeof PREF_DEFAULTS)[K] {
     const rawValue = getCanonicalRawPref(key);
     const normalizedValue = normalizePreferenceValue(key, rawValue);
     return normalizedValue ?? PREF_DEFAULTS[key];
 }
 
-export function setCanonicalPref(key: PreferenceKey, value: string): void {
+export function setCanonicalPref<K extends PreferenceKey>(key: K, value: (typeof PREF_DEFAULTS)[K]): void {
     setGlobalPrefByFullKey(getCanonicalPrefKey(key), value);
 }
 
@@ -184,7 +204,8 @@ export function setCanonicalPrefToDefaultEquivalent(key: PreferenceKey): void {
 }
 
 export function getPrefPrefixMigrationVersion(): string | undefined {
-    return getRawStringPrefByFullKey(getCanonicalPrefKey(PREF_PREFIX_MIGRATION_VERSION_KEY));
+    const rawValue = getRawPrefByFullKey(getCanonicalPrefKey(PREF_PREFIX_MIGRATION_VERSION_KEY));
+    return rawValue === undefined ? undefined : String(rawValue);
 }
 
 export function setPrefPrefixMigrationVersion(version: string): void {
@@ -204,24 +225,38 @@ export function isPrefDefaultEquivalent(key: PreferenceKey, value: unknown): boo
         return true;
     }
 
+    if (typeof PREF_DEFAULTS[key] === 'boolean') {
+        const parsedBooleanValue = parseRawBooleanPreferenceValue(value);
+        return parsedBooleanValue === null ? false : parsedBooleanValue === PREF_DEFAULTS[key];
+    }
+
     return String(value ?? '') === PREF_DEFAULTS[key];
 }
 
-export function normalizePreferenceValue(key: PreferenceKey, value: unknown): string | null {
+export function normalizePreferenceValue<K extends PreferenceKey>(key: K, value: unknown): (typeof PREF_DEFAULTS)[K] | null {
     if (value === undefined) {
         return null;
     }
 
     if (key === 'systemPrompt') {
-        return getStoredSystemPromptOverride(value);
+        return getStoredSystemPromptOverride(value) as (typeof PREF_DEFAULTS)[K] | null;
     }
 
     if (key === 'globalSystemPrompt') {
-        return getStoredGlobalSystemPromptOverride(value);
+        return getStoredGlobalSystemPromptOverride(value) as (typeof PREF_DEFAULTS)[K] | null;
+    }
+
+    if (typeof PREF_DEFAULTS[key] === 'boolean') {
+        const booleanValue = parseRawBooleanPreferenceValue(value);
+        if (booleanValue === null) {
+            return false as (typeof PREF_DEFAULTS)[K];
+        }
+
+        return (isPrefDefaultEquivalent(key, booleanValue) ? null : booleanValue) as (typeof PREF_DEFAULTS)[K] | null;
     }
 
     const stringValue = typeof value === 'string' ? value : String(value ?? '');
-    return isPrefDefaultEquivalent(key, stringValue) ? null : stringValue;
+    return (isPrefDefaultEquivalent(key, stringValue) ? null : stringValue) as (typeof PREF_DEFAULTS)[K] | null;
 }
 
 export function isBlankDefaultEquivalentPreferenceValue(key: PreferenceKey, value: unknown): boolean {
@@ -232,7 +267,38 @@ export function isBlankDefaultEquivalentPreferenceValue(key: PreferenceKey, valu
     return getNonEmptyPreferenceValue(value) === null;
 }
 
-function getPreferenceBranchState(key: PreferenceKey, value: string | undefined): PreferenceBranchState {
+export function parseRawBooleanPreferenceValue(value: unknown): boolean | null {
+    if (typeof value === 'boolean') {
+        return value;
+    }
+
+    if (typeof value === 'number') {
+        if (value === 1) {
+            return true;
+        }
+
+        if (value === 0) {
+            return false;
+        }
+
+        return null;
+    }
+
+    if (typeof value === 'string') {
+        const normalizedValue = value.trim().toLowerCase();
+        if (normalizedValue === 'true' || normalizedValue === '1') {
+            return true;
+        }
+
+        if (normalizedValue === 'false' || normalizedValue === '0') {
+            return false;
+        }
+    }
+
+    return null;
+}
+
+function getPreferenceBranchState(key: PreferenceKey, value: PreferenceValue | undefined): PreferenceBranchState {
     if (value === undefined) {
         return 'missing';
     }
