@@ -44,7 +44,7 @@ The plugin currently offers three ranking paths, depending on your settings and 
    - Available when you configure `API Key`, `Base URL`, and `Model`.
    - Used when you prefer generative model judgment over local-only ranking.
 
-`Highlight Backend` controls how these paths are used:
+`Highlight Backend` controls whether highlighting goes through the LLM path or the local non-LLM path. The neural reranker is a separate local enhancement for the non-LLM path and is enabled or managed independently in Settings:
 
 - `Auto`: recommended default; prefers local behavior when no API key is configured and falls back safely if LLM requests fail.
 - `LLM Preferred`: uses the configured LLM path first.
@@ -67,7 +67,7 @@ The plugin currently offers three ranking paths, depending on your settings and 
 
 ## ⚙️ Settings overview
 
-- `Highlight Backend`: choose `Auto`, `LLM Preferred`, or `Non-LLM Only`.
+- `Highlight Backend`: choose whether highlighting prefers the configured LLM path or stays on the local non-LLM path; the neural reranker is controlled separately.
 - `API Key`, `Base URL`, and `Model`: only needed for LLM-backed highlighting.
 - `Non-LLM Ranking`: choose `BM25` or `TF-IDF` for the local lexical ranking stage.
 - `Prompt Overrides`: optional advanced overrides for selection mode and full-paper prompts.
