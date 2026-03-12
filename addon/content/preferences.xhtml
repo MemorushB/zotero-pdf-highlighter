@@ -3,6 +3,7 @@
       onload="Zotero.ZoteroPDFHighlighter.hooks.onPrefsLoad(event)">
 
   <html:link rel="stylesheet" href="chrome://zotero-pdf-highlighter/content/preferences.css"/>
+  <html:link rel="localization" href="addon.ftl"/>
 
   <html:div class="pref-container">
     <html:div class="pref-header">
@@ -31,13 +32,13 @@
 
     <html:p data-l10n-id="pref-main-hint" class="pref-hint">Density controls how many highlights are created. Focus adjusts which sections are prioritized.</html:p>
 
-    <html:div class="advanced-section">
-      <html:div id="advanced-toggle" class="advanced-toggle" role="button" tabindex="0" aria-expanded="false">
+    <html:details class="advanced-section" id="advanced-section">
+      <html:summary id="advanced-toggle" class="advanced-toggle">
         <html:span id="advanced-toggle-arrow" aria-hidden="true">&#x25B6;</html:span>
         <html:span data-l10n-id="pref-advanced-toggle">Advanced Settings</html:span>
-      </html:div>
+      </html:summary>
 
-      <html:div id="advanced-content" style="display:none;">
+      <html:div id="advanced-content">
         <html:h3 data-l10n-id="pref-api-section">LLM Connection</html:h3>
 
         <html:div class="pref-row">
@@ -91,7 +92,34 @@
           <html:input type="number" id="pref-minConfidence" min="0" max="1" step="0.1" class="pref-input-short"/>
           <html:span data-l10n-id="pref-min-confidence-hint" class="pref-inline-hint">0.0 (keep all) - 1.0 (strict)</html:span>
         </html:div>
+
+        <!-- Neural Reranker -->
+        <html:div class="pref-section-heading" data-l10n-id="pref-neural-reranker-heading">Neural Reranker (Apple silicon Mac required)</html:div>
+
+        <html:div class="pref-row">
+          <html:label class="pref-label" data-l10n-id="pref-neural-reranker-enable">Enable Neural Reranking</html:label>
+          <html:input type="checkbox" id="pref-neuralReranker" />
+        </html:div>
+
+        <html:div class="pref-row">
+          <html:label class="pref-label" data-l10n-id="pref-neural-reranker-status">Status</html:label>
+          <html:div class="pref-neural-status-group">
+            <html:span id="neural-reranker-status" class="pref-status-badge" data-l10n-id="pref-neural-reranker-status-not-installed">Not installed</html:span>
+            <html:span id="neural-reranker-message" class="pref-neural-message pref-hint" data-l10n-id="pref-neural-reranker-message-not-installed">Download the local model to enable neural reranking.</html:span>
+          </html:div>
+        </html:div>
+
+        <html:div class="pref-row" id="neural-reranker-actions-row">
+          <html:label class="pref-label"></html:label>
+          <html:div class="pref-neural-actions">
+            <html:button id="neural-reranker-download-btn" class="pref-button" data-l10n-id="pref-neural-reranker-download">Download Model</html:button>
+            <html:button id="neural-reranker-compile-btn" class="pref-button" data-l10n-id="pref-neural-reranker-compile">Compile Model</html:button>
+            <html:button id="neural-reranker-recompile-btn" class="pref-button" data-l10n-id="pref-neural-reranker-recompile">Recompile Model</html:button>
+            <html:button id="neural-reranker-delete-btn" class="pref-button" data-l10n-id="pref-neural-reranker-delete">Delete Model</html:button>
+            <html:span id="neural-reranker-actions-hint" class="pref-hint" data-l10n-id="pref-neural-reranker-download-hint">Downloads ~25 MB for local inference and stays reusable across plugin upgrades.</html:span>
+          </html:div>
+        </html:div>
       </html:div>
-    </html:div>
+    </html:details>
   </html:div>
 </vbox>
