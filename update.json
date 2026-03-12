@@ -3,9 +3,9 @@
     "zotero-pdf-highlighter@memorushb.com": {
       "updates": [
         {
-          "version": "0.2.2",
-          "update_link": "https://github.com/MemorushB/zotero-smart-highlighter/releases/download/v0.2.2/zotero-smart-highlighter.xpi",
-          "update_hash": "sha512:a4a5932f16baf9cef931e3511390fe8bf83d5cb944ecb1add79f39d8e1cb60810f1fe8c393a64afa9ee4a8ebb9eeb719f955e808df7f22d6886076d6db93d426",
+          "version": "0.2.3",
+          "update_link": "https://github.com/MemorushB/zotero-smart-highlighter/releases/download/v0.2.3/zotero-smart-highlighter.xpi",
+          "update_hash": "sha512:df90151cebd789bbc5e986acf3eb69c1ce29ad031ee27869879103d64414571e1f5b5aee2195ce87d4b30d1239c77ef3c35ecdc17d69d26867ce0f45aaa3a141",
           "applications": {
             "zotero": {
               "strict_min_version": "6.999",
